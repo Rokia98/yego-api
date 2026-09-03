@@ -56,7 +56,7 @@ async function bootstrap() {
     const swaggerConfig = new DocumentBuilder()
       .setTitle('Yègo API')
       .setDescription('API de réservation de tickets de transport interurbain')
-      .setVersion('0.11.0')
+      .setVersion('0.12.0')
       .addBearerAuth()
       .build();
     const document = SwaggerModule.createDocument(app, swaggerConfig);

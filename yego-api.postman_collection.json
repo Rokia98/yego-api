@@ -1,7 +1,7 @@
 {
   "info": {
     "_postman_id": "yego-api-collection-v2",
-    "name": "Yègo API (v0.11)",
+    "name": "Yègo API (v0.12)",
     "description": "Collection complète de l'API Yègo — auth + refresh tokens, RBAC par permissions, cloisonnement par compagnie, vente au guichet, flotte, audit.\n\n## Démarrage\n1. Dossier « 🔐 Auth » → lancer « Login admin », « Login company_admin » et « Login agent » : les tokens sont enregistrés automatiquement dans les variables de collection (`admin_token`, `company_token`, `agent_token`, `access_token`, `refresh_token`).\n2. Les requêtes utilisent `{{admin_token}}`, `{{company_token}}` ou `{{agent_token}}` selon le rôle requis. Adapter au besoin.\n3. Renseigner `webhook_secret` (valeur de `PAYMENT_WEBHOOK_SECRET` du `.env`) pour la confirmation de paiement.\n\n## Comptes du seed\n| Rôle | Téléphone | Mot de passe |\n|---|---|---|\n| admin plateforme | +2250700000001 | ChangeMoi!Admin2026 |\n| company_admin (Garantis) | +2250700000002 | ChangeMoi!Compagnie |\n| agent (Garantis) | +2250700000003 | ChangeMoi!Agent |\n| voyageur | +225701234567 | password123 |",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
@@ -997,6 +997,76 @@
             "method": "PATCH",
             "header": [{ "key": "Authorization", "value": "Bearer {{company_token}}" }],
             "url": { "raw": "{{base_url}}/remboursements/1/confirmer", "host": ["{{base_url}}"], "path": ["remboursements", "1", "confirmer"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "🔔 Notifications",
+      "item": [
+        {
+          "name": "Enregistrer l'appareil (jeton FCM)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"token\": \"fake-fcm-token-pour-test-000000000001\",\n  \"plateforme\": \"android\"\n}" },
+            "url": { "raw": "{{base_url}}/notifications/appareils", "host": ["{{base_url}}"], "path": ["notifications", "appareils"] }
+          }
+        },
+        {
+          "name": "Retirer l'appareil",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"token\": \"fake-fcm-token-pour-test-000000000001\"\n}" },
+            "url": { "raw": "{{base_url}}/notifications/appareils", "host": ["{{base_url}}"], "path": ["notifications", "appareils"] }
+          }
+        },
+        {
+          "name": "Mon fil de notifications",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/notifications?nonLu=true&skip=0&take=20",
+              "host": ["{{base_url}}"],
+              "path": ["notifications"],
+              "query": [
+                { "key": "nonLu", "value": "true" },
+                { "key": "skip", "value": "0" },
+                { "key": "take", "value": "20" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Compteur non lues",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": { "raw": "{{base_url}}/notifications/compteur", "host": ["{{base_url}}"], "path": ["notifications", "compteur"] }
+          }
+        },
+        {
+          "name": "Marquer une notification lue",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": { "raw": "{{base_url}}/notifications/1/lu", "host": ["{{base_url}}"], "path": ["notifications", "1", "lu"] }
+          }
+        },
+        {
+          "name": "Tout marquer lu",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": { "raw": "{{base_url}}/notifications/lu", "host": ["{{base_url}}"], "path": ["notifications", "lu"] }
           }
         }
       ]

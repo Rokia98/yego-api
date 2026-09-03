@@ -558,6 +558,29 @@ Authorization: Bearer <token>
 
 ---
 
+### 🔔 Notifications push
+
+L'app mobile enregistre son jeton FCM ; le backend notifie le voyageur aux
+moments clés (réservation, paiement, annulation, remboursement, rappel de départ
+la veille). Le passager d'un guichet sans compte n'est pas notifié.
+
+```http
+POST   /api/v1/notifications/appareils      # { "token": "...", "plateforme": "android|ios|web" }
+DELETE /api/v1/notifications/appareils      # { "token": "..." }
+GET    /api/v1/notifications?nonLu=true     # fil in-app du voyageur
+GET    /api/v1/notifications/compteur       # { "nonLues": 3 }
+PATCH  /api/v1/notifications/:id/lu
+PATCH  /api/v1/notifications/lu             # tout marquer lu
+```
+
+Le push part par **Firebase Cloud Messaging** si `FCM_PROJECT_ID` /
+`FCM_CLIENT_EMAIL` / `FCM_PRIVATE_KEY` sont configurés. Sinon, les notifications
+restent consultables dans le fil in-app mais ne sont pas poussées. Types :
+`reservation.confirmee`, `paiement.confirme`, `reservation.annulee`,
+`remboursement.effectue`, `depart.rappel`.
+
+---
+
 ## 🔒 Authentification
 
 Tous les endpoints protégés nécessitent un token JWT dans le header:

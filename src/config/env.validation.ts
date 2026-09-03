@@ -78,6 +78,21 @@ export class EnvironmentVariables {
   @IsOptional()
   @IsString()
   LOG_LEVEL = 'log';
+
+  // Notifications push (Firebase Cloud Messaging). Toutes optionnelles :
+  // sans elles, les notifications sont persistées (fil in-app) mais pas
+  // envoyées en push — utile en dev / sans compte Firebase.
+  @IsOptional()
+  @IsString()
+  FCM_PROJECT_ID?: string;
+
+  @IsOptional()
+  @IsString()
+  FCM_CLIENT_EMAIL?: string;
+
+  @IsOptional()
+  @IsString()
+  FCM_PRIVATE_KEY?: string;
 }
 
 export function validate(config: Record<string, unknown>) {

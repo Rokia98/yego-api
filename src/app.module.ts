@@ -7,6 +7,7 @@ import { validate } from './config/env.validation';
 import { PrismaService } from './prisma.service';
 import { HealthModule } from './modules/health/health.module';
 import { MaintenanceModule } from './modules/maintenance/maintenance.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { AgentsModule } from './modules/agents/agents.module';
@@ -35,6 +36,7 @@ import { PaiementsModule } from './modules/paiements/paiements.module';
     ThrottlerModule.forRoot([{ ttl: 60000, limit: 60 }]),
     HealthModule,
     MaintenanceModule,
+    NotificationsModule,
     AuditModule,
     AuthModule,
     AgentsModule,

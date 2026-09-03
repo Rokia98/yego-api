@@ -288,6 +288,60 @@ describe('Yègo API (e2e)', () => {
   });
 
   // ---------------------------------------------------------------------------
+  describe('Notifications push', () => {
+    it('enregistre un appareil, notifie à la réservation, marque lu', async () => {
+      await http()
+        .post('/api/v1/notifications/appareils')
+        .set(auth('voyageur'))
+        .send({ token: 'e2e-fcm-token-registration-0001', plateforme: 'android' })
+        .expect(201);
+
+      await http()
+        .post('/api/v1/reservations')
+        .set(auth('voyageur'))
+        .send({ departId: fx.departFuturId, nombrePlaces: 1 })
+        .expect(201);
+
+      const liste = await http()
+        .get('/api/v1/notifications?nonLu=true')
+        .set(auth('voyageur'))
+        .expect(200);
+      const notif = liste.body.find(
+        (n: { type: string }) => n.type === 'reservation.confirmee',
+      );
+      expect(notif).toBeTruthy();
+
+      const compteur = await http()
+        .get('/api/v1/notifications/compteur')
+        .set(auth('voyageur'))
+        .expect(200);
+      expect(compteur.body.nonLues).toBeGreaterThan(0);
+
+      await http()
+        .patch(`/api/v1/notifications/${notif.id}/lu`)
+        .set(auth('voyageur'))
+        .expect(200);
+
+      const apres = await http()
+        .get('/api/v1/notifications?nonLu=true')
+        .set(auth('voyageur'))
+        .expect(200);
+      expect(
+        apres.body.find((n: { id: number }) => n.id === notif.id),
+      ).toBeUndefined();
+    });
+
+    it('un autre utilisateur ne voit pas mes notifications', async () => {
+      const r = await http()
+        .get('/api/v1/notifications')
+        .set(auth('gestionnaire'))
+        .expect(200);
+      expect(Array.isArray(r.body)).toBe(true);
+      expect(r.body.length).toBe(0);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   describe('Recherche voyageur', () => {
     it('rejette une date invalide (400)', () =>
       http()

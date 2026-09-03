@@ -8,6 +8,7 @@ import {
 import { paginer } from '../../common/pagination';
 import { UserRole } from '../../config/constants';
 import { AuditService } from '../audit/audit.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { AuthenticatedUser } from '../auth/strategies/jwt.strategy';
 import { CreatePaiementDto } from './dto/create-paiement.dto';
 import { CreatePaiementGuichetDto } from './dto/create-paiement-guichet.dto';
@@ -26,6 +27,7 @@ export class PaiementsService {
   constructor(
     private prisma: PrismaService,
     private audit: AuditService,
+    private notifications: NotificationsService,
   ) {}
 
   // NOTE: en production, ceci déclenche l'appel à l'API du fournisseur
@@ -150,11 +152,20 @@ export class PaiementsService {
   // Appelé uniquement par le webhook opérateur mobile money, authentifié par
   // secret partagé au niveau du contrôleur (pas par un utilisateur connecté).
   async confirmer(reservationId: number) {
-    return this.prisma.paiement.update({
+    const paiement = await this.prisma.paiement.update({
       where: { reservationId },
       data: { statut: 'paye', datePaiement: new Date() },
       include: { reservation: true },
     });
+
+    await this.notifications.notifier(paiement.reservation.utilisateurId, {
+      type: 'paiement.confirme',
+      titre: 'Paiement confirmé',
+      corps: 'Votre paiement est reçu. Votre ticket est disponible.',
+      donnees: { reservationId, paiementId: paiement.id },
+    });
+
+    return paiement;
   }
 
   async update(id: number, dto: UpdatePaiementDto, requestingUserId: number) {

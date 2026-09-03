@@ -1,5 +1,25 @@
 # Changelog - Yègo API
 
+## [0.12.0] - 2026-09-03
+
+### 🔔 Notifications push
+- Nouveau module **`notifications`** :
+  - **Appareils** — `POST /notifications/appareils` (`{ token, plateforme }`) et
+    `DELETE /notifications/appareils` : l'app mobile enregistre / retire son jeton FCM.
+  - **Fil in-app** — `GET /notifications` (`?nonLu=true`), `GET /notifications/compteur`,
+    `PATCH /notifications/:id/lu`, `PATCH /notifications/lu`. Cloisonné par utilisateur.
+- **Transport** : Firebase Cloud Messaging si `FCM_PROJECT_ID` / `FCM_CLIENT_EMAIL`
+  / `FCM_PRIVATE_KEY` sont fournis, sinon journalisation seule (le fil in-app
+  fonctionne dans tous les cas). Les jetons rejetés par FCM sont supprimés
+  automatiquement.
+- Une notification n'échoue **jamais** l'action métier (best-effort).
+- **Événements notifiés** au voyageur (jamais au passager guichet sans compte) :
+  `reservation.confirmee`, `paiement.confirme`, `reservation.annulee`,
+  `remboursement.effectue`, et **`depart.rappel`** (cron quotidien à 8 h pour les
+  départs du lendemain).
+- Modèles `AppareilNotification` + `Notification` ; migration `20260903123013_notifications`.
+- Tests : 44 unitaires + 24 e2e.
+
 ## [0.11.0] - 2026-09-03
 
 ### 🧪 Tests HTTP / e2e

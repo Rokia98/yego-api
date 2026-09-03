@@ -47,7 +47,9 @@ describe('ReservationsService.creerAuGuichet', () => {
       },
     };
     audit = { record: jest.fn().mockResolvedValue(undefined) };
-    service = new ReservationsService(prisma, audit as never);
+    service = new ReservationsService(prisma, audit as never, {
+      notifier: jest.fn().mockResolvedValue(undefined),
+    } as never);
   });
 
   const dto = {
@@ -134,9 +136,11 @@ describe('ReservationsService.annuler', () => {
       },
     };
     prisma = { $transaction: jest.fn((cb: any) => cb(tx)) };
-    service = new ReservationsService(prisma, {
-      record: jest.fn().mockResolvedValue(undefined),
-    } as never);
+    service = new ReservationsService(
+      prisma,
+      { record: jest.fn().mockResolvedValue(undefined) } as never,
+      { notifier: jest.fn().mockResolvedValue(undefined) } as never,
+    );
   });
 
   it('libère les places et crée un remboursement (10 % de frais à >3 j)', async () => {

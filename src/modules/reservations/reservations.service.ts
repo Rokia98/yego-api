@@ -16,6 +16,7 @@ import {
 import { assertCompagnieScope, peutVoirRessourceVoyageur } from '../../common/scope';
 import { assertCompagnieOperationnelle } from '../../common/compagnie';
 import { paginer } from '../../common/pagination';
+import { NotificationsService } from '../notifications/notifications.service';
 import { AuthenticatedUser } from '../auth/strategies/jwt.strategy';
 import { CreateReservationDto } from './dto/create-reservation.dto';
 import { CreateReservationGuichetDto } from './dto/create-reservation-guichet.dto';
@@ -31,7 +32,11 @@ const UTILISATEUR_SAFE_SELECT = {
 };
 
 const RESERVATION_INCLUDE = {
-  depart: { include: { trajet: true } },
+  depart: {
+    include: {
+      trajet: { include: { villeDepart: true, villeArrivee: true, compagnie: true } },
+    },
+  },
   utilisateur: { select: UTILISATEUR_SAFE_SELECT },
   agent: { select: UTILISATEUR_SAFE_SELECT },
   tickets: true,
@@ -43,6 +48,7 @@ export class ReservationsService {
   constructor(
     private prisma: PrismaService,
     private audit: AuditService,
+    private notifications: NotificationsService,
   ) {}
 
   // Réservation en ligne : le voyageur réserve pour lui-même (utilisateurId
@@ -58,7 +64,7 @@ export class ReservationsService {
     }
     await assertCompagnieOperationnelle(this.prisma, departInfo.trajet.compagnieId);
 
-    return this.prisma.$transaction(async (tx) => {
+    const reservation = await this.prisma.$transaction(async (tx) => {
       const depart = await tx.depart.findUnique({ where: { id: dto.departId } });
       if (!depart) throw new NotFoundException('Départ introuvable');
       if (depart.placesDisponibles < dto.nombrePlaces) {
@@ -80,6 +86,16 @@ export class ReservationsService {
         include: RESERVATION_INCLUDE,
       });
     });
+
+    const t = reservation.depart.trajet;
+    await this.notifications.notifier(utilisateurId, {
+      type: 'reservation.confirmee',
+      titre: 'Réservation confirmée',
+      corps: `${t.villeDepart.nom} → ${t.villeArrivee.nom}, ${dto.nombrePlaces} place(s). Réglez pour recevoir votre ticket.`,
+      donnees: { reservationId: reservation.id, departId: dto.departId },
+    });
+
+    return reservation;
   }
 
   // Réservation au guichet : un agent (ou company_admin) inscrit un voyageur
@@ -248,7 +264,11 @@ export class ReservationsService {
         }
       }
 
-      return { reservation: maj, remboursement, paiement: reservation.paiement };
+      return {
+        reservation: maj,
+        remboursement,
+        utilisateurId: reservation.utilisateurId,
+      };
     });
 
     await this.audit.record({
@@ -261,6 +281,15 @@ export class ReservationsService {
         remboursementCree: !!resultat.remboursement,
         montantRembourse: resultat.remboursement?.montantRembourse.toString(),
       },
+    });
+
+    await this.notifications.notifier(resultat.utilisateurId, {
+      type: 'reservation.annulee',
+      titre: 'Réservation annulée',
+      corps: resultat.remboursement
+        ? `Un remboursement de ${resultat.remboursement.montantRembourse} FCFA est en cours de traitement.`
+        : 'Votre réservation a été annulée.',
+      donnees: { reservationId: id },
     });
 
     return { ...resultat.reservation, remboursement: resultat.remboursement };

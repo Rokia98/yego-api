@@ -141,10 +141,44 @@ model Utilisateur {
   reservationsSaisies Reservation[] @relation("ReservationAgent")
   refreshTokens      RefreshToken[]
   auditLogs          AuditLog[]
+  appareils          AppareilNotification[]
+  notifications      Notification[]
 
   @@index([email])
   @@index([compagnieId])
   @@map("utilisateurs")
+}
+
+// Jeton d'un appareil (FCM) pour recevoir les notifications push.
+model AppareilNotification {
+  id                  Int         @id @default(autoincrement())
+  utilisateurId       Int         @map("utilisateur_id")
+  token               String      @unique
+  plateforme          String      // android | ios | web
+  dateCreation        DateTime    @default(now()) @map("date_creation")
+  derniereUtilisation DateTime    @default(now()) @map("derniere_utilisation")
+
+  utilisateur         Utilisateur @relation(fields: [utilisateurId], references: [id], onDelete: Cascade)
+
+  @@index([utilisateurId])
+  @@map("appareils_notification")
+}
+
+// Notification destinée à un voyageur : persistée (fil in-app) + envoyée en push.
+model Notification {
+  id            Int         @id @default(autoincrement())
+  utilisateurId Int         @map("utilisateur_id")
+  type          String      // reservation.confirmee, paiement.confirme, depart.rappel...
+  titre         String
+  corps         String
+  donnees       Json?       // payload de navigation (deep link)
+  lu            Boolean     @default(false)
+  dateCreation  DateTime    @default(now()) @map("date_creation")
+
+  utilisateur   Utilisateur @relation(fields: [utilisateurId], references: [id], onDelete: Cascade)
+
+  @@index([utilisateurId, lu])
+  @@map("notifications")
 }
 
 model RefreshToken {

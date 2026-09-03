@@ -13,6 +13,7 @@ import {
 } from '../../common/scope';
 import { UserRole } from '../../config/constants';
 import { paginer } from '../../common/pagination';
+import { NotificationsService } from '../notifications/notifications.service';
 import { AuthenticatedUser } from '../auth/strategies/jwt.strategy';
 import { CreateRemboursementDto } from './dto/create-remboursement.dto';
 
@@ -35,6 +36,7 @@ export class RemboursementsService {
   constructor(
     private prisma: PrismaService,
     private audit: AuditService,
+    private notifications: NotificationsService,
   ) {}
 
   // montantRembourse est recalculé côté serveur à partir du montant réellement
@@ -153,6 +155,13 @@ export class RemboursementsService {
         reservationId: remboursement.reservationId,
         montantRembourse: remboursement.montantRembourse.toString(),
       },
+    });
+
+    await this.notifications.notifier(remboursement.reservation.utilisateurId, {
+      type: 'remboursement.effectue',
+      titre: 'Remboursement effectué',
+      corps: `${remboursement.montantRembourse} FCFA vous ont été remboursés.`,
+      donnees: { remboursementId: id, reservationId: remboursement.reservationId },
     });
 
     return maj;

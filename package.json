@@ -1,6 +1,6 @@
 {
   "name": "yego-api",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "description": "API back-end de la plateforme Yègo (réservation de tickets de transport)",
   "license": "UNLICENSED",
   "scripts": {
@@ -41,6 +41,7 @@
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
     "express": "^4.21.0",
+    "firebase-admin": "^12.7.0",
     "helmet": "^7.1.0",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
@@ -67,14 +68,22 @@
     "typescript": "^5.5.0"
   },
   "jest": {
-    "moduleFileExtensions": ["js", "json", "ts"],
+    "moduleFileExtensions": [
+      "js",
+      "json",
+      "ts"
+    ],
     "rootDir": "src",
     "testRegex": ".*\\.spec\\.ts$",
-    "setupFiles": ["reflect-metadata"],
+    "setupFiles": [
+      "reflect-metadata"
+    ],
     "transform": {
       "^.+\\.(t|j)s$": "ts-jest"
     },
-    "collectCoverageFrom": ["**/*.(t|j)s"],
+    "collectCoverageFrom": [
+      "**/*.(t|j)s"
+    ],
     "coverageDirectory": "../coverage",
     "testEnvironment": "node"
   }
