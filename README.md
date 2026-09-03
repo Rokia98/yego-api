@@ -691,7 +691,9 @@ DATABASE_URL="postgresql://yego:<mdp>@localhost:5434/yego_test" npx prisma migra
 DATABASE_URL_TEST="postgresql://yego:<mdp>@localhost:5434/yego_test" npm run test:e2e
 ```
 
-En CI, le service `postgres` (`yego_test`) et `DATABASE_URL` sont déjà fournis.
+`docker compose down -v` détruit aussi `yego_test` : relancer les deux commandes
+ci-dessus après un reset du volume. En CI, le service `postgres` (`yego_test`) et
+`DATABASE_URL` sont déjà fournis.
 
 ---
 
