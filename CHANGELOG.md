@@ -1,5 +1,17 @@
 # Changelog - Yègo API
 
+## [Non versionné] - seed enrichi
+
+- **`prisma/seed.ts` refondu, orienté données** : 5 compagnies interurbaines
+  ivoiriennes (Garantis Transport, **UTB**, **CHONCO**, **GTI**, **AVS**), 8 villes,
+  13 trajets, 39 départs (10 / 12 / 15 septembre 2026). Chaque compagnie : un
+  abonnement actif, un `company_admin`, un agent, un véhicule, un chauffeur.
+- Garantis conserve ses numéros et flux d'exemple historiques (réservation payée
+  + tickets `A1`/`A2`, vente guichet, réservation annulée + remboursement) — les
+  comptes des tests et de la doc restent valides.
+- Nouveaux comptes : `company_admin` `+225070X000002` / `Gestion!<CODE>`,
+  agents `+225070X000003` / `Agent!<CODE>` (X = 5 UTB, 6 CHONCO, 7 GTI, 8 AVS).
+
 ## [0.12.0] - 2026-09-03
 
 ### 🔔 Notifications push

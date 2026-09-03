@@ -46,6 +46,39 @@ npm run start:dev
 
 L'API démarre sur `http://localhost:3000/api/v1`.
 
+### Données de démonstration
+
+`npm run prisma:seed` (ou `SEED_ON_START=true` avec Docker) crée un jeu de
+données inspiré des compagnies interurbaines ivoiriennes :
+
+| Compagnie | Exemple de lignes |
+|---|---|
+| **Garantis Transport** | Korhogo ↔ Abidjan |
+| **UTB** — Union des Transports de Bouaké | Abidjan → Bouaké → Korhogo, Abidjan → Korhogo |
+| **CHONCO Transport** | Abidjan ↔ Korhogo, Korhogo → Ferkessédougou |
+| **GTI** — Générale de Transport Interurbain | Abidjan → Man / Daloa / Yamoussoukro |
+| **AVS** — Africa Voyages Services | Abidjan ↔ San-Pédro |
+
+Chaque compagnie a un abonnement plateforme actif, un `company_admin`, un agent,
+un véhicule, un chauffeur, et des départs les 10 / 12 / 15 septembre 2026.
+
+**Comptes de test** (téléphone / mot de passe) :
+
+| Rôle | Téléphone | Mot de passe |
+|---|---|---|
+| admin plateforme | `+2250700000001` | `ChangeMoi!Admin2026` |
+| voyageur | `+225701234567` | `password123` |
+| voyageur | `+225707654321` | `password456` |
+| company_admin · Garantis | `+2250700000002` | `ChangeMoi!Compagnie` |
+| agent · Garantis | `+2250700000003` | `ChangeMoi!Agent` |
+| company_admin · UTB | `+2250705000002` | `Gestion!UTB` |
+| agent · UTB | `+2250705000003` | `Agent!UTB` |
+| company_admin · CHONCO | `+2250706000002` | `Gestion!CHONCO` |
+| company_admin · GTI | `+2250707000002` | `Gestion!GTI` |
+| company_admin · AVS | `+2250708000002` | `Gestion!AVS` |
+
+*(agents des autres compagnies : `…000003` avec `Agent!<CODE>`)*
+
 ## 📚 Documentation des Endpoints
 
 ### 🔐 Authentification
