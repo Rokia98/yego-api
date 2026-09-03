@@ -1,0 +1,1051 @@
+{
+  "info": {
+    "_postman_id": "yego-api-collection-v2",
+    "name": "Yègo API (v0.11)",
+    "description": "Collection complète de l'API Yègo — auth + refresh tokens, RBAC par permissions, cloisonnement par compagnie, vente au guichet, flotte, audit.\n\n## Démarrage\n1. Dossier « 🔐 Auth » → lancer « Login admin », « Login company_admin » et « Login agent » : les tokens sont enregistrés automatiquement dans les variables de collection (`admin_token`, `company_token`, `agent_token`, `access_token`, `refresh_token`).\n2. Les requêtes utilisent `{{admin_token}}`, `{{company_token}}` ou `{{agent_token}}` selon le rôle requis. Adapter au besoin.\n3. Renseigner `webhook_secret` (valeur de `PAYMENT_WEBHOOK_SECRET` du `.env`) pour la confirmation de paiement.\n\n## Comptes du seed\n| Rôle | Téléphone | Mot de passe |\n|---|---|---|\n| admin plateforme | +2250700000001 | ChangeMoi!Admin2026 |\n| company_admin (Garantis) | +2250700000002 | ChangeMoi!Compagnie |\n| agent (Garantis) | +2250700000003 | ChangeMoi!Agent |\n| voyageur | +225701234567 | password123 |",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "❤️ Health",
+      "item": [
+        {
+          "name": "Liveness",
+          "request": { "method": "GET", "url": { "raw": "{{base_url}}/health", "host": ["{{base_url}}"], "path": ["health"] } }
+        },
+        {
+          "name": "Readiness (DB)",
+          "request": { "method": "GET", "url": { "raw": "{{base_url}}/health/ready", "host": ["{{base_url}}"], "path": ["health", "ready"] } }
+        }
+      ]
+    },
+    {
+      "name": "🔐 Auth",
+      "item": [
+        {
+          "name": "Register (voyageur)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "if (j.accessToken) pm.collectionVariables.set('access_token', j.accessToken);",
+                  "if (j.refreshToken) pm.collectionVariables.set('refresh_token', j.refreshToken);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"nom\": \"Nouveau Voyageur\",\n  \"telephone\": \"+2250790000001\",\n  \"email\": \"nv@example.com\",\n  \"motDePasse\": \"MotDePasse123\"\n}" },
+            "url": { "raw": "{{base_url}}/auth/register", "host": ["{{base_url}}"], "path": ["auth", "register"] }
+          }
+        },
+        {
+          "name": "Login admin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.collectionVariables.set('admin_token', j.accessToken);",
+                  "pm.collectionVariables.set('access_token', j.accessToken);",
+                  "pm.collectionVariables.set('refresh_token', j.refreshToken);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"telephone\": \"+2250700000001\",\n  \"motDePasse\": \"ChangeMoi!Admin2026\"\n}" },
+            "url": { "raw": "{{base_url}}/auth/login", "host": ["{{base_url}}"], "path": ["auth", "login"] }
+          }
+        },
+        {
+          "name": "Login company_admin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.collectionVariables.set('company_token', j.accessToken);",
+                  "pm.collectionVariables.set('refresh_token', j.refreshToken);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"telephone\": \"+2250700000002\",\n  \"motDePasse\": \"ChangeMoi!Compagnie\"\n}" },
+            "url": { "raw": "{{base_url}}/auth/login", "host": ["{{base_url}}"], "path": ["auth", "login"] }
+          }
+        },
+        {
+          "name": "Login agent",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.collectionVariables.set('agent_token', j.accessToken);",
+                  "pm.collectionVariables.set('refresh_token', j.refreshToken);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"telephone\": \"+2250700000003\",\n  \"motDePasse\": \"ChangeMoi!Agent\"\n}" },
+            "url": { "raw": "{{base_url}}/auth/login", "host": ["{{base_url}}"], "path": ["auth", "login"] }
+          }
+        },
+        {
+          "name": "Login voyageur",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.collectionVariables.set('access_token', j.accessToken);",
+                  "pm.collectionVariables.set('refresh_token', j.refreshToken);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"telephone\": \"+225701234567\",\n  \"motDePasse\": \"password123\"\n}" },
+            "url": { "raw": "{{base_url}}/auth/login", "host": ["{{base_url}}"], "path": ["auth", "login"] }
+          }
+        },
+        {
+          "name": "Refresh (rotation)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "if (j.accessToken) pm.collectionVariables.set('access_token', j.accessToken);",
+                  "if (j.refreshToken) pm.collectionVariables.set('refresh_token', j.refreshToken);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"refreshToken\": \"{{refresh_token}}\"\n}" },
+            "url": { "raw": "{{base_url}}/auth/refresh", "host": ["{{base_url}}"], "path": ["auth", "refresh"] }
+          }
+        },
+        {
+          "name": "Logout (session courante)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"refreshToken\": \"{{refresh_token}}\"\n}" },
+            "url": { "raw": "{{base_url}}/auth/logout", "host": ["{{base_url}}"], "path": ["auth", "logout"] }
+          }
+        },
+        {
+          "name": "Logout-all (toutes les sessions)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": { "raw": "{{base_url}}/auth/logout-all", "host": ["{{base_url}}"], "path": ["auth", "logout-all"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "👥 Utilisateurs",
+      "item": [
+        {
+          "name": "Créer un compte au guichet (agent/admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{agent_token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"nom\": \"Client Comptoir\",\n  \"telephone\": \"+2250790001111\",\n  \"email\": \"comptoir@example.com\"\n}" },
+            "url": { "raw": "{{base_url}}/utilisateurs", "host": ["{{base_url}}"], "path": ["utilisateurs"] }
+          }
+        },
+        {
+          "name": "Lister les utilisateurs (admin)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{admin_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/utilisateurs?skip=0&take=20",
+              "host": ["{{base_url}}"],
+              "path": ["utilisateurs"],
+              "query": [{ "key": "skip", "value": "0" }, { "key": "take", "value": "20" }]
+            }
+          }
+        },
+        {
+          "name": "Attribuer un rôle (admin)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{admin_token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"role\": \"company_admin\",\n  \"compagnieId\": 1\n}" },
+            "url": { "raw": "{{base_url}}/utilisateurs/5/role", "host": ["{{base_url}}"], "path": ["utilisateurs", "5", "role"] }
+          }
+        },
+        {
+          "name": "Mon profil",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": { "raw": "{{base_url}}/utilisateurs/4", "host": ["{{base_url}}"], "path": ["utilisateurs", "4"] }
+          }
+        },
+        {
+          "name": "Modifier mon profil",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"nom\": \"Jean Dupont\",\n  \"email\": \"jean.new@example.com\"\n}" },
+            "url": { "raw": "{{base_url}}/utilisateurs/4", "host": ["{{base_url}}"], "path": ["utilisateurs", "4"] }
+          }
+        },
+        {
+          "name": "Supprimer mon compte",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": { "raw": "{{base_url}}/utilisateurs/4", "host": ["{{base_url}}"], "path": ["utilisateurs", "4"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "🧑‍💼 Agents guichet",
+      "item": [
+        {
+          "name": "Créer un agent (company_admin)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "if (j.id) pm.collectionVariables.set('agent_id', j.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{company_token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"nom\": \"Awa Kone\",\n  \"telephone\": \"+2250700998877\",\n  \"email\": \"awa.kone@garantis.ci\",\n  \"motDePasse\": \"MotDePasseAgent1\"\n}" },
+            "url": { "raw": "{{base_url}}/agents", "host": ["{{base_url}}"], "path": ["agents"] }
+          }
+        },
+        {
+          "name": "Lister mes agents (company_admin)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{company_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/agents?skip=0&take=20",
+              "host": ["{{base_url}}"],
+              "path": ["agents"],
+              "query": [{ "key": "skip", "value": "0" }, { "key": "take", "value": "20" }]
+            }
+          }
+        },
+        {
+          "name": "Détail d'un agent",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{company_token}}" }],
+            "url": { "raw": "{{base_url}}/agents/{{agent_id}}", "host": ["{{base_url}}"], "path": ["agents", "{{agent_id}}"] }
+          }
+        },
+        {
+          "name": "Modifier un agent (nom / mot de passe / actif)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{company_token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"nom\": \"Awa Kone Traoré\",\n  \"actif\": true\n}" },
+            "url": { "raw": "{{base_url}}/agents/{{agent_id}}", "host": ["{{base_url}}"], "path": ["agents", "{{agent_id}}"] }
+          }
+        },
+        {
+          "name": "Désactiver un agent (soft delete)",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{company_token}}" }],
+            "url": { "raw": "{{base_url}}/agents/{{agent_id}}", "host": ["{{base_url}}"], "path": ["agents", "{{agent_id}}"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "🏙️ Villes",
+      "item": [
+        {
+          "name": "Lister les villes",
+          "request": { "method": "GET", "url": { "raw": "{{base_url}}/villes", "host": ["{{base_url}}"], "path": ["villes"] } }
+        },
+        {
+          "name": "Récupérer une ville",
+          "request": { "method": "GET", "url": { "raw": "{{base_url}}/villes/1", "host": ["{{base_url}}"], "path": ["villes", "1"] } }
+        },
+        {
+          "name": "Créer une ville (admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{admin_token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"nom\": \"Man\"\n}" },
+            "url": { "raw": "{{base_url}}/villes", "host": ["{{base_url}}"], "path": ["villes"] }
+          }
+        },
+        {
+          "name": "Modifier une ville (admin)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{admin_token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"nom\": \"Man (Montagnes)\"\n}" },
+            "url": { "raw": "{{base_url}}/villes/5", "host": ["{{base_url}}"], "path": ["villes", "5"] }
+          }
+        },
+        {
+          "name": "Supprimer une ville (admin)",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{admin_token}}" }],
+            "url": { "raw": "{{base_url}}/villes/5", "host": ["{{base_url}}"], "path": ["villes", "5"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "🏢 Compagnies",
+      "item": [
+        {
+          "name": "Lister les compagnies",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/compagnies?skip=0&take=10",
+              "host": ["{{base_url}}"],
+              "path": ["compagnies"],
+              "query": [{ "key": "skip", "value": "0" }, { "key": "take", "value": "10" }]
+            }
+          }
+        },
+        {
+          "name": "Filtrer par statut",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/compagnies/statut/actif",
+              "host": ["{{base_url}}"],
+              "path": ["compagnies", "statut", "actif"]
+            }
+          }
+        },
+        {
+          "name": "Récupérer une compagnie",
+          "request": { "method": "GET", "url": { "raw": "{{base_url}}/compagnies/1", "host": ["{{base_url}}"], "path": ["compagnies", "1"] } }
+        },
+        {
+          "name": "Créer une compagnie (admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{admin_token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"nom\": \"UTB Transport\",\n  \"telephone\": \"+2250701020304\",\n  \"email\": \"contact@utb.ci\"\n}" },
+            "url": { "raw": "{{base_url}}/compagnies", "host": ["{{base_url}}"], "path": ["compagnies"] }
+          }
+        },
+        {
+          "name": "Modifier les infos (company_admin sa compagnie)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{company_token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"logoUrl\": \"https://cdn.example.com/garantis.png\",\n  \"telephone\": \"+2250700000009\"\n}" },
+            "url": { "raw": "{{base_url}}/compagnies/1", "host": ["{{base_url}}"], "path": ["compagnies", "1"] }
+          }
+        },
+        {
+          "name": "Modérer le statut (admin)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{admin_token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"statut\": \"actif\"\n}" },
+            "url": { "raw": "{{base_url}}/compagnies/1/statut", "host": ["{{base_url}}"], "path": ["compagnies", "1", "statut"] }
+          }
+        },
+        {
+          "name": "Supprimer une compagnie (admin)",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{admin_token}}" }],
+            "url": { "raw": "{{base_url}}/compagnies/2", "host": ["{{base_url}}"], "path": ["compagnies", "2"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "💼 Abonnements",
+      "item": [
+        {
+          "name": "Créer un abonnement (admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{admin_token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"compagnieId\": 1,\n  \"plan\": \"standard\",\n  \"montant\": 150000,\n  \"dateDebut\": \"2026-01-01\",\n  \"dateFin\": \"2027-01-01\"\n}" },
+            "url": { "raw": "{{base_url}}/abonnements", "host": ["{{base_url}}"], "path": ["abonnements"] }
+          }
+        },
+        {
+          "name": "Lister les abonnements (admin)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{admin_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/abonnements?statut=actif",
+              "host": ["{{base_url}}"],
+              "path": ["abonnements"],
+              "query": [{ "key": "statut", "value": "actif" }]
+            }
+          }
+        },
+        {
+          "name": "Renouveler un abonnement (admin)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{admin_token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"dateFin\": \"2028-01-01\",\n  \"statut\": \"actif\"\n}" },
+            "url": { "raw": "{{base_url}}/abonnements/1", "host": ["{{base_url}}"], "path": ["abonnements", "1"] }
+          }
+        },
+        {
+          "name": "Mon abonnement (company_admin)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{company_token}}" }],
+            "url": { "raw": "{{base_url}}/abonnements/compagnie/1", "host": ["{{base_url}}"], "path": ["abonnements", "compagnie", "1"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "🛣️ Trajets",
+      "item": [
+        {
+          "name": "Lister les trajets",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/trajets?skip=0&take=10",
+              "host": ["{{base_url}}"],
+              "path": ["trajets"],
+              "query": [{ "key": "skip", "value": "0" }, { "key": "take", "value": "10" }]
+            }
+          }
+        },
+        {
+          "name": "Récupérer un trajet",
+          "request": { "method": "GET", "url": { "raw": "{{base_url}}/trajets/1", "host": ["{{base_url}}"], "path": ["trajets", "1"] } }
+        },
+        {
+          "name": "Trajets d'une compagnie",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/trajets/compagnie/1", "host": ["{{base_url}}"], "path": ["trajets", "compagnie", "1"] }
+          }
+        },
+        {
+          "name": "Créer un trajet (company_admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{company_token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"compagnieId\": 1,\n  \"villeDepartId\": 1,\n  \"villeArriveeId\": 3,\n  \"heureDepart\": \"09:00\",\n  \"heureArriveeEstimee\": \"15:00\",\n  \"prix\": 12000,\n  \"joursRecurrence\": \"lun,mer,ven\"\n}" },
+            "url": { "raw": "{{base_url}}/trajets", "host": ["{{base_url}}"], "path": ["trajets"] }
+          }
+        },
+        {
+          "name": "Modifier un trajet (company_admin)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{company_token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"prix\": 13000,\n  \"statut\": \"actif\"\n}" },
+            "url": { "raw": "{{base_url}}/trajets/1", "host": ["{{base_url}}"], "path": ["trajets", "1"] }
+          }
+        },
+        {
+          "name": "Supprimer un trajet (company_admin)",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{company_token}}" }],
+            "url": { "raw": "{{base_url}}/trajets/3", "host": ["{{base_url}}"], "path": ["trajets", "3"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "🚐 Véhicules",
+      "item": [
+        {
+          "name": "Lister (sa flotte)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{company_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/vehicules?skip=0&take=20",
+              "host": ["{{base_url}}"],
+              "path": ["vehicules"],
+              "query": [{ "key": "skip", "value": "0" }, { "key": "take", "value": "20" }]
+            }
+          }
+        },
+        {
+          "name": "Récupérer un véhicule",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{company_token}}" }],
+            "url": { "raw": "{{base_url}}/vehicules/1", "host": ["{{base_url}}"], "path": ["vehicules", "1"] }
+          }
+        },
+        {
+          "name": "Créer un véhicule (company_admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{company_token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"immatriculation\": \"CI-4321-XY\",\n  \"typeVehicule\": \"Autocar 45 places\",\n  \"capacite\": 45,\n  \"statut\": \"actif\"\n}" },
+            "url": { "raw": "{{base_url}}/vehicules", "host": ["{{base_url}}"], "path": ["vehicules"] }
+          }
+        },
+        {
+          "name": "Modifier un véhicule (company_admin)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{company_token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"statut\": \"maintenance\"\n}" },
+            "url": { "raw": "{{base_url}}/vehicules/1", "host": ["{{base_url}}"], "path": ["vehicules", "1"] }
+          }
+        },
+        {
+          "name": "Supprimer un véhicule (company_admin)",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{company_token}}" }],
+            "url": { "raw": "{{base_url}}/vehicules/3", "host": ["{{base_url}}"], "path": ["vehicules", "3"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "🧑‍✈️ Chauffeurs",
+      "item": [
+        {
+          "name": "Lister (ses chauffeurs)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{company_token}}" }],
+            "url": { "raw": "{{base_url}}/chauffeurs", "host": ["{{base_url}}"], "path": ["chauffeurs"] }
+          }
+        },
+        {
+          "name": "Récupérer un chauffeur",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{company_token}}" }],
+            "url": { "raw": "{{base_url}}/chauffeurs/1", "host": ["{{base_url}}"], "path": ["chauffeurs", "1"] }
+          }
+        },
+        {
+          "name": "Créer un chauffeur (company_admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{company_token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"nom\": \"Ama Traore\",\n  \"telephone\": \"+2250701020304\",\n  \"numeroPermis\": \"PC-CI-009988\"\n}" },
+            "url": { "raw": "{{base_url}}/chauffeurs", "host": ["{{base_url}}"], "path": ["chauffeurs"] }
+          }
+        },
+        {
+          "name": "Modifier un chauffeur (company_admin)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{company_token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"telephone\": \"+2250705060708\"\n}" },
+            "url": { "raw": "{{base_url}}/chauffeurs/1", "host": ["{{base_url}}"], "path": ["chauffeurs", "1"] }
+          }
+        },
+        {
+          "name": "Supprimer un chauffeur (company_admin)",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{company_token}}" }],
+            "url": { "raw": "{{base_url}}/chauffeurs/2", "host": ["{{base_url}}"], "path": ["chauffeurs", "2"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "📅 Départs",
+      "item": [
+        {
+          "name": "Recherche voyageur",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/departs/recherche?depart=Korhogo&arrivee=Abidjan&date=2026-09-10",
+              "host": ["{{base_url}}"],
+              "path": ["departs", "recherche"],
+              "query": [
+                { "key": "depart", "value": "Korhogo" },
+                { "key": "arrivee", "value": "Abidjan" },
+                { "key": "date", "value": "2026-09-10" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Lister les départs",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/departs?skip=0&take=10",
+              "host": ["{{base_url}}"],
+              "path": ["departs"],
+              "query": [{ "key": "skip", "value": "0" }, { "key": "take", "value": "10" }]
+            }
+          }
+        },
+        {
+          "name": "Récupérer un départ",
+          "request": { "method": "GET", "url": { "raw": "{{base_url}}/departs/1", "host": ["{{base_url}}"], "path": ["departs", "1"] } }
+        },
+        {
+          "name": "Créer un départ (agent/company_admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{agent_token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"trajetId\": 1,\n  \"dateDepart\": \"2026-09-15\",\n  \"placesTotales\": 50,\n  \"vehiculeId\": 1,\n  \"chauffeurId\": 1\n}" },
+            "url": { "raw": "{{base_url}}/departs", "host": ["{{base_url}}"], "path": ["departs"] }
+          }
+        },
+        {
+          "name": "Modifier un départ (agent/company_admin)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{agent_token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"vehiculeId\": 1,\n  \"chauffeurId\": 1,\n  \"statut\": \"planifie\"\n}" },
+            "url": { "raw": "{{base_url}}/departs/1", "host": ["{{base_url}}"], "path": ["departs", "1"] }
+          }
+        },
+        {
+          "name": "Supprimer un départ (company_admin)",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{company_token}}" }],
+            "url": { "raw": "{{base_url}}/departs/3", "host": ["{{base_url}}"], "path": ["departs", "3"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "🎫 Réservations",
+      "item": [
+        {
+          "name": "Réserver en ligne (voyageur)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "if (j.id) pm.collectionVariables.set('reservation_id', j.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"departId\": 2,\n  \"nombrePlaces\": 1\n}" },
+            "url": { "raw": "{{base_url}}/reservations", "host": ["{{base_url}}"], "path": ["reservations"] }
+          }
+        },
+        {
+          "name": "Vente au guichet (agent)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "if (j.id) pm.collectionVariables.set('reservation_id', j.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{agent_token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"departId\": 2,\n  \"nombrePlaces\": 2,\n  \"passager\": {\n    \"nom\": \"Awa Cisse\",\n    \"telephone\": \"+2250790005555\"\n  },\n  \"paiementEspece\": true\n}" },
+            "url": { "raw": "{{base_url}}/reservations/guichet", "host": ["{{base_url}}"], "path": ["reservations", "guichet"] }
+          }
+        },
+        {
+          "name": "Lister les réservations (cloisonné)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{agent_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/reservations?skip=0&take=20",
+              "host": ["{{base_url}}"],
+              "path": ["reservations"],
+              "query": [{ "key": "skip", "value": "0" }, { "key": "take", "value": "20" }]
+            }
+          }
+        },
+        {
+          "name": "Récupérer une réservation",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": { "raw": "{{base_url}}/reservations/{{reservation_id}}", "host": ["{{base_url}}"], "path": ["reservations", "{{reservation_id}}"] }
+          }
+        },
+        {
+          "name": "Annuler une réservation",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": { "raw": "{{base_url}}/reservations/{{reservation_id}}/annuler", "host": ["{{base_url}}"], "path": ["reservations", "{{reservation_id}}", "annuler"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "💳 Paiements",
+      "item": [
+        {
+          "name": "Créer un paiement (voyageur)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"reservationId\": {{reservation_id}},\n  \"moyenPaiement\": \"wave\",\n  \"referenceTransaction\": \"WV-REF-001\"\n}" },
+            "url": { "raw": "{{base_url}}/paiements", "host": ["{{base_url}}"], "path": ["paiements"] }
+          }
+        },
+        {
+          "name": "Encaisser au guichet (agent)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{agent_token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"reservationId\": {{reservation_id}},\n  \"moyenPaiement\": \"espece\"\n}" },
+            "url": { "raw": "{{base_url}}/paiements/guichet", "host": ["{{base_url}}"], "path": ["paiements", "guichet"] }
+          }
+        },
+        {
+          "name": "Confirmer un paiement (webhook opérateur)",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "x-webhook-secret", "value": "{{webhook_secret}}" }],
+            "url": {
+              "raw": "{{base_url}}/paiements/reservation/{{reservation_id}}/confirmer",
+              "host": ["{{base_url}}"],
+              "path": ["paiements", "reservation", "{{reservation_id}}", "confirmer"]
+            }
+          }
+        },
+        {
+          "name": "Lister mes paiements",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/paiements?skip=0&take=10",
+              "host": ["{{base_url}}"],
+              "path": ["paiements"],
+              "query": [{ "key": "skip", "value": "0" }, { "key": "take", "value": "10" }]
+            }
+          }
+        },
+        {
+          "name": "Paiement d'une réservation",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": { "raw": "{{base_url}}/paiements/reservation/{{reservation_id}}", "host": ["{{base_url}}"], "path": ["paiements", "reservation", "{{reservation_id}}"] }
+          }
+        },
+        {
+          "name": "Modifier un paiement (avant confirmation)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"moyenPaiement\": \"orange_money\"\n}" },
+            "url": { "raw": "{{base_url}}/paiements/1", "host": ["{{base_url}}"], "path": ["paiements", "1"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "🎟️ Tickets",
+      "item": [
+        {
+          "name": "Générer un ticket (voyageur ou personnel compagnie)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "if (j.codeQr) pm.collectionVariables.set('code_qr', j.codeQr);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"siege\": \"A1\"\n}" },
+            "url": { "raw": "{{base_url}}/tickets/reservation/{{reservation_id}}", "host": ["{{base_url}}"], "path": ["tickets", "reservation", "{{reservation_id}}"] }
+          }
+        },
+        {
+          "name": "Valider un ticket à l'embarquement (agent)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{agent_token}}" }],
+            "url": { "raw": "{{base_url}}/tickets/valider/{{code_qr}}", "host": ["{{base_url}}"], "path": ["tickets", "valider", "{{code_qr}}"] }
+          }
+        },
+        {
+          "name": "Lister les tickets (cloisonné)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/tickets?skip=0&take=10",
+              "host": ["{{base_url}}"],
+              "path": ["tickets"],
+              "query": [{ "key": "skip", "value": "0" }, { "key": "take", "value": "10" }]
+            }
+          }
+        },
+        {
+          "name": "Tickets d'une réservation",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": { "raw": "{{base_url}}/tickets/reservation/{{reservation_id}}", "host": ["{{base_url}}"], "path": ["tickets", "reservation", "{{reservation_id}}"] }
+          }
+        },
+        {
+          "name": "Annuler un ticket",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": { "raw": "{{base_url}}/tickets/1", "host": ["{{base_url}}"], "path": ["tickets", "1"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "💰 Remboursements",
+      "item": [
+        {
+          "name": "Demander un remboursement (voyageur)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"reservationId\": {{reservation_id}},\n  \"fraisRetenus\": 500\n}" },
+            "url": { "raw": "{{base_url}}/remboursements", "host": ["{{base_url}}"], "path": ["remboursements"] }
+          }
+        },
+        {
+          "name": "Mes remboursements",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/remboursements?skip=0&take=10",
+              "host": ["{{base_url}}"],
+              "path": ["remboursements"],
+              "query": [{ "key": "skip", "value": "0" }, { "key": "take", "value": "10" }]
+            }
+          }
+        },
+        {
+          "name": "Filtrer par statut",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": { "raw": "{{base_url}}/remboursements/statut/en_attente", "host": ["{{base_url}}"], "path": ["remboursements", "statut", "en_attente"] }
+          }
+        },
+        {
+          "name": "Remboursement d'une réservation",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": { "raw": "{{base_url}}/remboursements/reservation/{{reservation_id}}", "host": ["{{base_url}}"], "path": ["remboursements", "reservation", "{{reservation_id}}"] }
+          }
+        },
+        {
+          "name": "Confirmer le remboursement (company_admin/admin)",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Authorization", "value": "Bearer {{company_token}}" }],
+            "url": { "raw": "{{base_url}}/remboursements/1/confirmer", "host": ["{{base_url}}"], "path": ["remboursements", "1", "confirmer"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "📋 Journal d'audit",
+      "item": [
+        {
+          "name": "Lister le journal (admin)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{admin_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/audit-logs?skip=0&take=20",
+              "host": ["{{base_url}}"],
+              "path": ["audit-logs"],
+              "query": [{ "key": "skip", "value": "0" }, { "key": "take", "value": "20" }]
+            }
+          }
+        },
+        {
+          "name": "Filtrer (entite / action)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{admin_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/audit-logs?entite=ticket&action=ticket.validation",
+              "host": ["{{base_url}}"],
+              "path": ["audit-logs"],
+              "query": [
+                { "key": "entite", "value": "ticket" },
+                { "key": "action", "value": "ticket.validation" }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:3000/api/v1", "type": "string" },
+    { "key": "webhook_secret", "value": "REMPLACEZ_PAR_PAYMENT_WEBHOOK_SECRET", "type": "string" },
+    { "key": "access_token", "value": "", "type": "string" },
+    { "key": "refresh_token", "value": "", "type": "string" },
+    { "key": "admin_token", "value": "", "type": "string" },
+    { "key": "company_token", "value": "", "type": "string" },
+    { "key": "agent_token", "value": "", "type": "string" },
+    { "key": "reservation_id", "value": "2", "type": "string" },
+    { "key": "agent_id", "value": "3", "type": "string" },
+    { "key": "code_qr", "value": "550e8400-e29b-41d4-a716-446655440001", "type": "string" }
+  ]
+}

@@ -1,0 +1,118 @@
+import { plainToInstance, Transform } from 'class-transformer';
+import {
+  IsEnum,
+  IsInt,
+  IsOptional,
+  IsString,
+  MinLength,
+  validateSync,
+} from 'class-validator';
+
+export enum Environnement {
+  Development = 'development',
+  Production = 'production',
+  Test = 'test',
+}
+
+/**
+ * Schéma des variables d'environnement. Validé au démarrage (voir
+ * ConfigModule.forRoot({ validate }) dans app.module.ts) : si une variable
+ * requise est absente ou faible, le process refuse de démarrer.
+ */
+export class EnvironmentVariables {
+  @IsEnum(Environnement)
+  NODE_ENV: Environnement = Environnement.Development;
+
+  @IsOptional()
+  @Transform(({ value }) =>
+    value === undefined || value === '' ? undefined : Number(value),
+  )
+  @IsInt()
+  PORT = 3000;
+
+  @IsString()
+  DATABASE_URL: string;
+
+  // Un secret faible est aussi dangereux qu'une absence de secret.
+  @IsString()
+  @MinLength(32, {
+    message:
+      'JWT_SECRET doit faire au moins 32 caractères. Générez-le avec: openssl rand -base64 48',
+  })
+  JWT_SECRET: string;
+
+  // Durée de vie de l'access token. Courte volontairement : la révocation
+  // repose sur cette fenêtre + le refresh token.
+  @IsOptional()
+  @IsString()
+  JWT_EXPIRES_IN = '15m';
+
+  @IsOptional()
+  @Transform(({ value }) =>
+    value === undefined || value === '' ? undefined : Number(value),
+  )
+  @IsInt()
+  REFRESH_TOKEN_EXPIRES_DAYS = 30;
+
+  // Délai de paiement d'une réservation avant libération automatique des places.
+  @IsOptional()
+  @Transform(({ value }) =>
+    value === undefined || value === '' ? undefined : Number(value),
+  )
+  @IsInt()
+  RESERVATION_PAIEMENT_TTL_MINUTES = 30;
+
+  @IsString()
+  @MinLength(16, {
+    message:
+      'PAYMENT_WEBHOOK_SECRET doit faire au moins 16 caractères et être distinct de JWT_SECRET.',
+  })
+  PAYMENT_WEBHOOK_SECRET: string;
+
+  // Liste d'origines séparées par des virgules. Vide/absent = aucune origine
+  // navigateur autorisée (les clients non-navigateur ne sont pas concernés).
+  @IsOptional()
+  @IsString()
+  CORS_ORIGIN?: string;
+
+  @IsOptional()
+  @IsString()
+  LOG_LEVEL = 'log';
+}
+
+export function validate(config: Record<string, unknown>) {
+  const validated = plainToInstance(EnvironmentVariables, config, {
+    enableImplicitConversion: true,
+  });
+
+  const errors = validateSync(validated, {
+    skipMissingProperties: false,
+  });
+
+  if (errors.length > 0) {
+    const details = errors
+      .map((e) => Object.values(e.constraints ?? {}).join(', '))
+      .join('\n  - ');
+    throw new Error(
+      `Configuration d'environnement invalide :\n  - ${details}\n` +
+        'Copiez .env.example vers .env et renseignez les valeurs.',
+    );
+  }
+
+  if (validated.PAYMENT_WEBHOOK_SECRET === validated.JWT_SECRET) {
+    throw new Error(
+      'PAYMENT_WEBHOOK_SECRET doit être distinct de JWT_SECRET.',
+    );
+  }
+
+  if (
+    validated.NODE_ENV === Environnement.Production &&
+    (!validated.CORS_ORIGIN || validated.CORS_ORIGIN.trim() === '*')
+  ) {
+    throw new Error(
+      'En production, CORS_ORIGIN doit lister explicitement les origines autorisées (jamais "*").',
+    );
+  }
+
+  return validated;
+}

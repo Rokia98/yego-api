@@ -1,0 +1,55 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-yego}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD requis}
+      POSTGRES_DB: ${POSTGRES_DB:-yego}
+    volumes:
+      - yego_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-yego} -d ${POSTGRES_DB:-yego}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # Exposé sur l'hôte en 5434 (évite un conflit avec un Postgres local en 5432).
+    # Accès depuis l'hôte : postgresql://yego:...@localhost:5434/yego
+    ports:
+      - "${DB_HOST_PORT:-5434}:5432"
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      # Communication inter-conteneurs : Postgres écoute toujours sur 5432 côté réseau Docker.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-yego}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-yego}?schema=public
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET requis}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-15m}
+      REFRESH_TOKEN_EXPIRES_DAYS: ${REFRESH_TOKEN_EXPIRES_DAYS:-30}
+      PAYMENT_WEBHOOK_SECRET: ${PAYMENT_WEBHOOK_SECRET:?PAYMENT_WEBHOOK_SECRET requis}
+      CORS_ORIGIN: ${CORS_ORIGIN:-*}
+      SWAGGER_ENABLED: ${SWAGGER_ENABLED:-false}
+      SEED_ON_START: ${SEED_ON_START:-false}
+    ports:
+      - "${API_PORT:-3000}:3000"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://localhost:3000/api/v1/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  yego_pgdata:

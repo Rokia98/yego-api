@@ -1,0 +1,256 @@
+generator client {
+  provider      = "prisma-client-js"
+  // 'native' pour le poste de dev ; la cible musl/openssl-3 pour l'image
+  // Docker (node:20-alpine) — évite tout téléchargement de moteur au runtime.
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Ville {
+  id             Int       @id @default(autoincrement())
+  nom            String    @unique
+  trajetsDepart  Trajet[]  @relation("VilleDepart")
+  trajetsArrivee Trajet[]  @relation("VilleArrivee")
+
+  @@map("villes")
+}
+
+model Compagnie {
+  id            Int            @id @default(autoincrement())
+  nom           String
+  telephone     String?
+  email         String?
+  logoUrl       String?        @map("logo_url")
+  statut        String         @default("en_attente")
+  dateCreation  DateTime       @default(now()) @map("date_creation")
+
+  abonnements   Abonnement[]
+  vehicules     Vehicule[]
+  chauffeurs    Chauffeur[]
+  trajets       Trajet[]
+  // Personnel rattaché à la compagnie : company_admin et agents guichet.
+  utilisateurs  Utilisateur[]
+
+  @@map("compagnies")
+}
+
+model Abonnement {
+  id           Int       @id @default(autoincrement())
+  compagnieId  Int       @map("compagnie_id")
+  plan         String
+  montant      Decimal   @db.Decimal(10, 2)
+  dateDebut    DateTime  @map("date_debut")
+  dateFin      DateTime  @map("date_fin")
+  statut       String    @default("actif")
+
+  compagnie    Compagnie @relation(fields: [compagnieId], references: [id], onDelete: Cascade)
+
+  @@map("abonnements")
+}
+
+model Vehicule {
+  id              Int       @id @default(autoincrement())
+  compagnieId     Int       @map("compagnie_id")
+  immatriculation String    @unique
+  typeVehicule    String?   @map("type_vehicule")
+  capacite        Int
+  statut          String    @default("actif")
+
+  compagnie       Compagnie @relation(fields: [compagnieId], references: [id], onDelete: Cascade)
+  departs         Depart[]
+
+  @@map("vehicules")
+}
+
+model Chauffeur {
+  id            Int       @id @default(autoincrement())
+  compagnieId   Int       @map("compagnie_id")
+  nom           String
+  telephone     String?
+  numeroPermis  String?   @map("numero_permis")
+
+  compagnie     Compagnie @relation(fields: [compagnieId], references: [id], onDelete: Cascade)
+  departs       Depart[]
+
+  @@map("chauffeurs")
+}
+
+model Trajet {
+  id                   Int       @id @default(autoincrement())
+  compagnieId          Int       @map("compagnie_id")
+  villeDepartId        Int       @map("ville_depart_id")
+  villeArriveeId       Int       @map("ville_arrivee_id")
+  heureDepart          DateTime  @map("heure_depart") @db.Time()
+  heureArriveeEstimee  DateTime? @map("heure_arrivee_estimee") @db.Time()
+  prix                 Decimal   @db.Decimal(10, 2)
+  joursRecurrence      String?   @map("jours_recurrence")
+  statut               String    @default("actif")
+
+  compagnie            Compagnie @relation(fields: [compagnieId], references: [id], onDelete: Cascade)
+  villeDepart          Ville     @relation("VilleDepart", fields: [villeDepartId], references: [id])
+  villeArrivee         Ville     @relation("VilleArrivee", fields: [villeArriveeId], references: [id])
+  departs              Depart[]
+
+  @@map("trajets")
+}
+
+model Depart {
+  id                 Int           @id @default(autoincrement())
+  trajetId           Int           @map("trajet_id")
+  vehiculeId         Int?          @map("vehicule_id")
+  chauffeurId        Int?          @map("chauffeur_id")
+  dateDepart         DateTime      @map("date_depart") @db.Date
+  placesTotales      Int           @map("places_totales")
+  placesDisponibles  Int           @map("places_disponibles")
+  statut             String        @default("planifie")
+
+  trajet             Trajet        @relation(fields: [trajetId], references: [id], onDelete: Cascade)
+  vehicule           Vehicule?     @relation(fields: [vehiculeId], references: [id])
+  chauffeur          Chauffeur?    @relation(fields: [chauffeurId], references: [id])
+  reservations       Reservation[]
+
+  @@unique([trajetId, dateDepart])
+  @@index([dateDepart])
+  @@map("departs")
+}
+
+model Utilisateur {
+  id               Int           @id @default(autoincrement())
+  nom              String
+  telephone        String        @unique
+  email            String?
+  motDePasseHash   String?       @map("mot_de_passe_hash")
+  role             String        @default("user")
+  // Compte actif ? Un compte désactivé ne peut plus se connecter et ses
+  // access tokens en cours sont invalidés (voir tokenVersion / JwtStrategy).
+  actif            Boolean       @default(true)
+  // Rattachement à une compagnie pour les rôles 'agent' et 'company_admin' :
+  // leurs actions sont limitées aux ressources de cette compagnie.
+  compagnieId      Int?          @map("compagnie_id")
+  // Incrémenté lors d'une déconnexion globale / changement de mot de passe :
+  // invalide instantanément tous les access tokens déjà émis (voir JwtStrategy).
+  tokenVersion     Int           @default(0) @map("token_version")
+  dateCreation     DateTime      @default(now()) @map("date_creation")
+
+  compagnie          Compagnie?     @relation(fields: [compagnieId], references: [id], onDelete: SetNull)
+  reservations       Reservation[]  @relation("ReservationVoyageur")
+  reservationsSaisies Reservation[] @relation("ReservationAgent")
+  refreshTokens      RefreshToken[]
+  auditLogs          AuditLog[]
+
+  @@index([email])
+  @@index([compagnieId])
+  @@map("utilisateurs")
+}
+
+model RefreshToken {
+  id             Int          @id @default(autoincrement())
+  utilisateurId  Int          @map("utilisateur_id")
+  // On ne stocke jamais le jeton en clair : seulement son SHA-256.
+  tokenHash      String       @unique @map("token_hash")
+  expiresAt      DateTime     @map("expires_at")
+  revokedAt      DateTime?    @map("revoked_at")
+  // Rotation : id du jeton qui a remplacé celui-ci lors d'un /auth/refresh.
+  remplacePar    Int?         @map("remplace_par")
+  creeParIp      String?      @map("cree_par_ip")
+  userAgent      String?      @map("user_agent")
+  dateCreation   DateTime     @default(now()) @map("date_creation")
+
+  utilisateur    Utilisateur  @relation(fields: [utilisateurId], references: [id], onDelete: Cascade)
+
+  @@index([utilisateurId])
+  @@map("refresh_tokens")
+}
+
+model AuditLog {
+  id            Int          @id @default(autoincrement())
+  acteurId      Int?         @map("acteur_id")
+  acteurRole    String?      @map("acteur_role")
+  action        String
+  entite        String
+  entiteId      Int?         @map("entite_id")
+  metadata      Json?
+  ip            String?
+  dateCreation  DateTime     @default(now()) @map("date_creation")
+
+  acteur        Utilisateur? @relation(fields: [acteurId], references: [id], onDelete: SetNull)
+
+  @@index([entite, entiteId])
+  @@index([action])
+  @@index([acteurId])
+  @@map("audit_logs")
+}
+
+model Reservation {
+  id                Int           @id @default(autoincrement())
+  // Le voyageur connecté (canal 'en_ligne'). NULL pour une vente au guichet :
+  // le voyageur n'a pas de compte, seuls son nom et son téléphone sont notés.
+  utilisateurId     Int?          @map("utilisateur_id")
+  // L'agent qui a saisi la réservation, uniquement pour le canal 'guichet'.
+  agentId           Int?          @map("agent_id")
+  // Identité du voyageur au guichet (quand utilisateurId est NULL).
+  passagerNom       String?       @map("passager_nom")
+  passagerTelephone String?       @map("passager_telephone")
+  departId          Int           @map("depart_id")
+  nombrePlaces      Int           @map("nombre_places")
+  canal             String
+  statut            String        @default("confirmee")
+  dateReservation   DateTime      @default(now()) @map("date_reservation")
+
+  utilisateur       Utilisateur?  @relation("ReservationVoyageur", fields: [utilisateurId], references: [id])
+  agent             Utilisateur?  @relation("ReservationAgent", fields: [agentId], references: [id])
+  depart            Depart        @relation(fields: [departId], references: [id])
+  tickets           Ticket[]
+  paiement          Paiement?
+  remboursement     Remboursement?
+
+  @@index([utilisateurId])
+  @@index([agentId])
+  @@index([departId])
+  @@map("reservations")
+}
+
+model Ticket {
+  id             Int         @id @default(autoincrement())
+  reservationId  Int         @map("reservation_id")
+  codeQr         String      @unique @map("code_qr")
+  siege          String?
+  statut         String      @default("valide")
+  dateCreation   DateTime    @default(now()) @map("date_creation")
+
+  reservation    Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+
+  @@map("tickets")
+}
+
+model Paiement {
+  id                     Int         @id @default(autoincrement())
+  reservationId          Int         @unique @map("reservation_id")
+  montant                Decimal     @db.Decimal(10, 2)
+  moyenPaiement          String      @map("moyen_paiement")
+  referenceTransaction   String?     @map("reference_transaction")
+  statut                 String      @default("en_attente")
+  datePaiement           DateTime?   @map("date_paiement")
+
+  reservation            Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+
+  @@map("paiements")
+}
+
+model Remboursement {
+  id                  Int         @id @default(autoincrement())
+  reservationId       Int         @unique @map("reservation_id")
+  montantRembourse    Decimal     @map("montant_rembourse") @db.Decimal(10, 2)
+  fraisRetenus        Decimal     @default(0) @map("frais_retenus") @db.Decimal(10, 2)
+  statut              String      @default("en_attente")
+  dateDemande         DateTime    @default(now()) @map("date_demande")
+  dateRemboursement   DateTime?   @map("date_remboursement")
+
+  reservation         Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+
+  @@map("remboursements")
+}
