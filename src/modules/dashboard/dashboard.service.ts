@@ -5,6 +5,7 @@ import { DASHBOARD, ReservationStatut, UserRole } from '../../config/constants';
 import { AuthenticatedUser } from '../auth/strategies/jwt.strategy';
 import { DashboardPeriodeDto } from './dto/dashboard-periode.dto';
 import { DashboardClassementDto } from './dto/dashboard-classement.dto';
+import { DashboardSerieDto } from './dto/dashboard-serie.dto';
 
 interface ReservationAgregable {
   statut: string;
@@ -130,6 +131,72 @@ export class DashboardService {
             : 0,
       },
     };
+  }
+
+  // Série journalière pour les courbes de tendance : un point par jour de la
+  // période (jours vides inclus avec des zéros). Base = date de vente
+  // (reservation.dateReservation). Fenêtre bornée à DASHBOARD.SERIE_MAX_JOURS.
+  async serie(user: AuthenticatedUser, dto: DashboardSerieDto) {
+    const { debut, fin } = this.resoudrePeriode(
+      dto.from,
+      dto.to,
+      DASHBOARD.SERIE_MAX_JOURS,
+    );
+    const compagnieId = this.resoudreCompagnieFiltre(user, dto.compagnieId);
+
+    const reservations = await this.prisma.reservation.findMany({
+      where: {
+        dateReservation: { gte: debut, lte: fin },
+        ...(compagnieId != null ? { depart: { trajet: { compagnieId } } } : {}),
+      },
+      select: {
+        dateReservation: true,
+        canal: true,
+        statut: true,
+        nombrePlaces: true,
+        paiement: { select: { statut: true, montant: true } },
+      },
+    });
+
+    const parJour = new Map<
+      string,
+      {
+        date: string;
+        reservations: number;
+        placesVendues: number;
+        revenu: Prisma.Decimal;
+        parCanal: { en_ligne: number; guichet: number };
+      }
+    >();
+    for (const date of this.joursEntre(debut, fin)) {
+      parJour.set(date, {
+        date,
+        reservations: 0,
+        placesVendues: 0,
+        revenu: new Prisma.Decimal(0),
+        parCanal: { en_ligne: 0, guichet: 0 },
+      });
+    }
+
+    for (const r of reservations) {
+      const jour = r.dateReservation.toISOString().slice(0, 10);
+      const b = parJour.get(jour);
+      if (!b) continue;
+      b.reservations += 1;
+      if (r.canal === 'en_ligne') b.parCanal.en_ligne += 1;
+      else if (r.canal === 'guichet') b.parCanal.guichet += 1;
+      if (r.statut === ReservationStatut.CONFIRMEE) {
+        b.placesVendues += r.nombrePlaces;
+      }
+      if (r.paiement?.statut === 'paye') {
+        b.revenu = b.revenu.plus(r.paiement.montant);
+      }
+    }
+
+    return [...parJour.values()].map((b) => ({
+      ...b,
+      revenu: b.revenu.toString(),
+    }));
   }
 
   // Classement des trajets par chiffre d'affaires encaissé sur la période
@@ -287,7 +354,11 @@ export class DashboardService {
   // `from` absent → DASHBOARD.PERIODE_DEFAUT_JOURS avant `to`. `to` absent →
   // maintenant. Fenêtre bornée à PERIODE_MAX_JOURS pour éviter d'agréger un
   // historique trop large en une seule requête.
-  private resoudrePeriode(from?: string, to?: string): { debut: Date; fin: Date } {
+  private resoudrePeriode(
+    from?: string,
+    to?: string,
+    maxJours: number = DASHBOARD.PERIODE_MAX_JOURS,
+  ): { debut: Date; fin: Date } {
     const fin = to ? new Date(to) : new Date();
     fin.setHours(23, 59, 59, 999);
 
@@ -298,10 +369,26 @@ export class DashboardService {
     debut.setHours(0, 0, 0, 0);
 
     const debutMin = new Date(fin);
-    debutMin.setDate(debutMin.getDate() - DASHBOARD.PERIODE_MAX_JOURS);
+    debutMin.setDate(debutMin.getDate() - maxJours);
     debutMin.setHours(0, 0, 0, 0);
 
     return { debut: debut < debutMin ? debutMin : debut, fin };
+  }
+
+  // Liste des jours (YYYY-MM-DD, UTC) de `debut` à `fin` inclus.
+  private joursEntre(debut: Date, fin: Date): string[] {
+    const jours: string[] = [];
+    const d = new Date(
+      Date.UTC(debut.getUTCFullYear(), debut.getUTCMonth(), debut.getUTCDate()),
+    );
+    const finUtc = new Date(
+      Date.UTC(fin.getUTCFullYear(), fin.getUTCMonth(), fin.getUTCDate()),
+    );
+    while (d <= finUtc) {
+      jours.push(d.toISOString().slice(0, 10));
+      d.setUTCDate(d.getUTCDate() + 1);
+    }
+    return jours;
   }
 
   private clampLimite(limit?: number): number {

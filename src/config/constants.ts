@@ -104,4 +104,6 @@ export const DASHBOARD = {
   PERIODE_MAX_JOURS: 366,
   CLASSEMENT_LIMITE_DEFAUT: 10,
   CLASSEMENT_LIMITE_MAX: 50,
+  // Série temporelle (courbes) : fenêtre bornée plus court, un point par jour.
+  SERIE_MAX_JOURS: 92,
 } as const;

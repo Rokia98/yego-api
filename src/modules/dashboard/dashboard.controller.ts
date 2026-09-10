@@ -8,6 +8,7 @@ import { AuthenticatedUser } from '../auth/strategies/jwt.strategy';
 import { DashboardService } from './dashboard.service';
 import { DashboardPeriodeDto } from './dto/dashboard-periode.dto';
 import { DashboardClassementDto } from './dto/dashboard-classement.dto';
+import { DashboardSerieDto } from './dto/dashboard-serie.dto';
 
 // Admin plateforme (toutes compagnies, filtrables) ou company_admin (la sienne).
 @Controller('dashboard')
@@ -23,6 +24,15 @@ export class DashboardController {
     @Query() dto: DashboardPeriodeDto,
   ) {
     return this.dashboardService.resume(user, dto);
+  }
+
+  // Série journalière (courbes de tendance) : un point par jour de la période.
+  @Get('series')
+  series(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() dto: DashboardSerieDto,
+  ) {
+    return this.dashboardService.serie(user, dto);
   }
 
   // Trajets les plus vendus (revenu encaissé).

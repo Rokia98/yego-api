@@ -120,6 +120,80 @@ describe('DashboardService', () => {
     });
   });
 
+  describe('serie — points journaliers', () => {
+    it('un point par jour de la période, jours vides à zéro', async () => {
+      const res = await service.serie(admin, {
+        from: '2026-09-01',
+        to: '2026-09-03',
+      });
+      expect(res.map((p) => p.date)).toEqual([
+        '2026-09-01',
+        '2026-09-02',
+        '2026-09-03',
+      ]);
+      expect(res[0]).toEqual({
+        date: '2026-09-01',
+        reservations: 0,
+        placesVendues: 0,
+        revenu: '0',
+        parCanal: { en_ligne: 0, guichet: 0 },
+      });
+    });
+
+    it('ventile réservations / places / revenu / canal par jour de vente', async () => {
+      prisma.reservation.findMany.mockResolvedValue([
+        {
+          dateReservation: new Date('2026-09-02T09:00:00Z'),
+          canal: 'en_ligne',
+          statut: 'confirmee',
+          nombrePlaces: 2,
+          paiement: { statut: 'paye', montant: new Prisma.Decimal(30000) },
+        },
+        {
+          dateReservation: new Date('2026-09-02T15:00:00Z'),
+          canal: 'guichet',
+          statut: 'confirmee',
+          nombrePlaces: 1,
+          paiement: { statut: 'en_attente', montant: new Prisma.Decimal(15000) },
+        },
+        {
+          dateReservation: new Date('2026-09-03T10:00:00Z'),
+          canal: 'en_ligne',
+          statut: 'annulee',
+          nombrePlaces: 1,
+          paiement: null,
+        },
+      ]);
+
+      const res = await service.serie(admin, {
+        from: '2026-09-02',
+        to: '2026-09-03',
+      });
+
+      expect(res[0]).toEqual({
+        date: '2026-09-02',
+        reservations: 2,
+        placesVendues: 3,
+        revenu: '30000',
+        parCanal: { en_ligne: 1, guichet: 1 },
+      });
+      expect(res[1]).toMatchObject({
+        date: '2026-09-03',
+        reservations: 1,
+        placesVendues: 0, // annulée
+        revenu: '0',
+      });
+    });
+
+    it('company_admin est restreint à sa compagnie', async () => {
+      await service.serie(gestionnaire(1), { compagnieId: 99, from: '2026-09-01', to: '2026-09-01' });
+      const where = prisma.reservation.findMany.mock.calls[0][0].where;
+      expect(where).toEqual(
+        expect.objectContaining({ depart: { trajet: { compagnieId: 1 } } }),
+      );
+    });
+  });
+
   describe('compagniesPlusActives', () => {
     it('refuse un company_admin (403)', async () => {
       await expect(
