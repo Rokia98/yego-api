@@ -666,4 +666,177 @@ describe('Yègo API (e2e)', () => {
         .expect(200)
         .then((r) => expect(Array.isArray(r.body)).toBe(true)));
   });
+
+  // ---------------------------------------------------------------------------
+  describe('Validation hors-ligne (QR signés)', () => {
+    let codeQr: string;
+
+    it('GET /tickets/cle-publique expose la clé publique Ed25519', () =>
+      http()
+        .get('/api/v1/tickets/cle-publique')
+        .expect(200)
+        .then((r) => {
+          expect(r.body.algo).toBe('ed25519');
+          expect(r.body.clePublique).toContain('BEGIN PUBLIC KEY');
+        }));
+
+    it('un ticket généré porte un codeQr signé (YEGO1.…)', async () => {
+      const resa = await http()
+        .post('/api/v1/reservations')
+        .set(auth('voyageur'))
+        .send({ departId: fx.departFuturId, nombrePlaces: 1 })
+        .expect(201);
+      await http()
+        .post('/api/v1/paiements')
+        .set(auth('voyageur'))
+        .send({ reservationId: resa.body.id, moyenPaiement: 'orange_money' })
+        .expect(201);
+      await http()
+        .post(`/api/v1/paiements/reservation/${resa.body.id}/simuler`)
+        .set(auth('voyageur'))
+        .send({ resultat: 'succes' })
+        .expect(201);
+      const ticket = await http()
+        .post(`/api/v1/tickets/reservation/${resa.body.id}`)
+        .set(auth('voyageur'))
+        .send({})
+        .expect(201);
+      expect(ticket.body.codeQr).toMatch(/^YEGO1\./);
+      codeQr = ticket.body.codeQr;
+    });
+
+    it('le manifeste du départ liste les tickets (agent)', () =>
+      http()
+        .get(`/api/v1/tickets/depart/${fx.departFuturId}/manifeste`)
+        .set(auth('agent'))
+        .expect(200)
+        .then((r) => {
+          expect(r.body.clePublique).toContain('BEGIN PUBLIC KEY');
+          expect(r.body.tickets.some((t: any) => t.codeQr === codeQr)).toBe(true);
+        }));
+
+    it('sync : 1er scan valide, 2e scan « déjà utilisé »', async () => {
+      const r1 = await http()
+        .post('/api/v1/tickets/validations/sync')
+        .set(auth('agent'))
+        .send({ scans: [{ codeQr, scanneA: new Date().toISOString() }] })
+        .expect(201);
+      expect(r1.body.resultats[0].valide).toBe(true);
+
+      const r2 = await http()
+        .post('/api/v1/tickets/validations/sync')
+        .set(auth('agent'))
+        .send({ scans: [{ codeQr }] })
+        .expect(201);
+      expect(r2.body.resultats[0].valide).toBe(false);
+    });
+
+    it('rejette une signature falsifiée', () =>
+      http()
+        .post('/api/v1/tickets/valider/YEGO1.eyJ0IjoxfQ.zzzz')
+        .set(auth('agent'))
+        .expect(201)
+        .then((r) => expect(r.body.valide).toBe(false)));
+  });
+
+  // ---------------------------------------------------------------------------
+  describe('Suivi GPS temps réel', () => {
+    let suiviToken: string;
+
+    it('le gestionnaire démarre un départ planifié', async () => {
+      const r = await http()
+        .post(`/api/v1/departs/${fx.departFuturId}/demarrer`)
+        .set(auth('gestionnaire'))
+        .expect(201);
+      expect(r.body.depart.statut).toBe('en_route');
+      expect(r.body.suiviToken).toEqual(expect.any(String));
+      suiviToken = r.body.suiviToken;
+    });
+
+    it('refuse un second démarrage (409)', () =>
+      http()
+        .post(`/api/v1/departs/${fx.departFuturId}/demarrer`)
+        .set(auth('gestionnaire'))
+        .expect(409));
+
+    it('position refusée sans jeton de suivi (401)', () =>
+      http()
+        .post(`/api/v1/departs/${fx.departFuturId}/position`)
+        .send({ latitude: 6.5, longitude: -4.5 })
+        .expect(401));
+
+    it('le chauffeur poste une position avec le jeton', () =>
+      http()
+        .post(`/api/v1/departs/${fx.departFuturId}/position`)
+        .set('Authorization', `Bearer ${suiviToken}`)
+        .send({ latitude: 6.8, longitude: -5.0, vitesse: 72 })
+        .expect(201)
+        .then((r) => expect(r.body.ok).toBe(true)));
+
+    it('le voyageur ayant réservé suit le départ (position + ETA)', () =>
+      http()
+        .get(`/api/v1/departs/${fx.departFuturId}/suivi`)
+        .set(auth('voyageur'))
+        .expect(200)
+        .then((r) => {
+          expect(r.body.statut).toBe('en_route');
+          expect(r.body.derniere).not.toBeNull();
+          expect(r.body.eta.minutesRestantes).toBeGreaterThan(0);
+        }));
+
+    it('un voyageur sans réservation est refusé (403)', async () => {
+      const autre = await http()
+        .post('/api/v1/auth/register')
+        .send({
+          nom: 'Sans Résa',
+          telephone: '+2250709999999',
+          motDePasse: 'MotDePasseTest1',
+        })
+        .expect(201);
+      await http()
+        .get(`/api/v1/departs/${fx.departFuturId}/suivi`)
+        .set('Authorization', `Bearer ${autre.body.accessToken}`)
+        .expect(403);
+    });
+
+    it("l'historique renvoie la trace", () =>
+      http()
+        .get(`/api/v1/departs/${fx.departFuturId}/suivi/historique`)
+        .set(auth('voyageur'))
+        .expect(200)
+        .then((r) => expect(r.body.points.length).toBeGreaterThan(0)));
+
+    it('le chauffeur clôt le trajet', () =>
+      http()
+        .post(`/api/v1/departs/${fx.departFuturId}/arriver`)
+        .set('Authorization', `Bearer ${suiviToken}`)
+        .expect(201)
+        .then((r) => expect(r.body.statut).toBe('arrive')));
+  });
+
+  // ---------------------------------------------------------------------------
+  describe('Notifications horaire / retard', () => {
+    it('POST /departs/:id/retard : gestionnaire, cloisonné', async () => {
+      await http()
+        .post(`/api/v1/departs/${fx.departBouakeId}/retard`)
+        .set(auth('gestionnaire'))
+        .send({ minutesRetard: 40, motif: 'route coupée' })
+        .expect(201)
+        .then((r) => expect(r.body.retardMinutes).toBe(40));
+
+      await http()
+        .post(`/api/v1/departs/${fx.departBouakeId}/retard`)
+        .set(auth('voyageur'))
+        .send({ minutesRetard: 5 })
+        .expect(403);
+    });
+
+    it('PATCH /trajets/:id (heure de départ) est accepté par le gestionnaire', () =>
+      http()
+        .patch(`/api/v1/trajets/${fx.trajetId}`)
+        .set(auth('gestionnaire'))
+        .send({ heureDepart: '08:30' })
+        .expect(200)
+        .then((r) => expect(r.body.heureDepart).toContain('08:30')));
+  });
 });

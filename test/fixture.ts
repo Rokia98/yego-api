@@ -11,6 +11,7 @@ export interface Fixture {
   trajetId: number;
   departId: number;
   departFuturId: number;
+  departBouakeId: number;
   comptes: {
     admin: { telephone: string; motDePasse: string };
     gestionnaire: { telephone: string; motDePasse: string };
@@ -42,9 +43,15 @@ export async function reinitialiser(prisma: PrismaService): Promise<Fixture> {
   const hash = await bcrypt.hash(MDP, 4);
 
   const [korhogo, abidjan, bouake] = await Promise.all([
-    prisma.ville.create({ data: { nom: 'Korhogo' } }),
-    prisma.ville.create({ data: { nom: 'Abidjan' } }),
-    prisma.ville.create({ data: { nom: 'Bouaké' } }),
+    prisma.ville.create({
+      data: { nom: 'Korhogo', latitude: 9.4581, longitude: -5.6296 },
+    }),
+    prisma.ville.create({
+      data: { nom: 'Abidjan', latitude: 5.3599, longitude: -4.0083 },
+    }),
+    prisma.ville.create({
+      data: { nom: 'Bouaké', latitude: 7.6906, longitude: -5.0303 },
+    }),
   ]);
 
   const compagnie = await prisma.compagnie.create({
@@ -79,6 +86,7 @@ export async function reinitialiser(prisma: PrismaService): Promise<Fixture> {
       villeDepartId: korhogo.id,
       villeArriveeId: abidjan.id,
       heureDepart: heure('08:00'),
+      heureArriveeEstimee: heure('16:00'),
       prix: 15000,
       statut: 'actif',
     },
@@ -105,7 +113,7 @@ export async function reinitialiser(prisma: PrismaService): Promise<Fixture> {
   const departFutur = await prisma.depart.create({
     data: { trajetId: trajet.id, dateDepart: dansUnMois, placesTotales: 50, placesDisponibles: 50, statut: 'planifie' },
   });
-  await prisma.depart.create({
+  const departBouake = await prisma.depart.create({
     data: { trajetId: trajetBouake.id, dateDepart: dansTroisJours, placesTotales: 50, placesDisponibles: 50, statut: 'planifie' },
   });
   const departProche = await prisma.depart.create({
@@ -121,6 +129,7 @@ export async function reinitialiser(prisma: PrismaService): Promise<Fixture> {
     trajetId: trajet.id,
     departId: departProche.id,
     departFuturId: departFutur.id,
+    departBouakeId: departBouake.id,
     comptes: {
       admin: { telephone: '+2250700000001', motDePasse: MDP },
       gestionnaire: { telephone: '+2250700000002', motDePasse: MDP },
