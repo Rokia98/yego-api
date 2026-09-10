@@ -41,6 +41,13 @@ export class DepartsController {
     );
   }
 
+  // Plan de salle : sièges déjà attribués sur ce départ (route publique, utile
+  // au voyageur avant réservation). Déclarée avant ':id' pour la lisibilité.
+  @Get(':id/sieges')
+  sieges(@Param('id', ParseIntPipe) id: number) {
+    return this.departsService.sieges(id);
+  }
+
   @Get(':id')
   findOne(@Param('id', ParseIntPipe) id: number) {
     return this.departsService.findOne(id);

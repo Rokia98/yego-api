@@ -17,10 +17,13 @@ export class RechercheDepartDto {
   @MaxLength(80)
   arrivee: string;
 
-  // Date (YYYY-MM-DD). Sans `dateFin`, on cherche ce jour précis ;
-  // avec `dateFin`, `date` devient le début d'une fourchette.
+  // Date (YYYY-MM-DD). Optionnelle : sans elle, la recherche part d'aujourd'hui.
+  // `date` est toujours le début d'une fourchette ; sans `dateFin`, celle-ci
+  // s'étend sur RECHERCHE_DEPART.FENETRE_DEFAUT_JOURS jours.
+  // Pour ne cibler qu'un jour précis : passer `date` et `dateFin` identiques.
+  @IsOptional()
   @IsDateString()
-  date: string;
+  date?: string;
 
   @IsOptional()
   @IsDateString()

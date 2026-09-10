@@ -12,6 +12,7 @@ import { AuditService } from '../audit/audit.service';
 import { UserRole } from '../../config/constants';
 import { peutVoirRessourceVoyageur } from '../../common/scope';
 import { paginer } from '../../common/pagination';
+import { siegesOccupesDepart } from '../../common/sieges';
 import { AuthenticatedUser } from '../auth/strategies/jwt.strategy';
 
 export interface ActeurContexte {
@@ -47,7 +48,10 @@ export class TicketsService {
       where: { id: reservationId },
       include: {
         paiement: true,
-        _count: { select: { tickets: { where: { statut: { not: 'annule' } } } } },
+        tickets: {
+          where: { statut: { not: 'annule' } },
+          select: { siege: true },
+        },
         depart: { include: { trajet: { select: { compagnieId: true } } } },
       },
     });
@@ -63,31 +67,43 @@ export class TicketsService {
         "Le paiement de cette réservation n'est pas confirmé",
       );
     }
-    if (reservation._count.tickets >= reservation.nombrePlaces) {
+    if (reservation.tickets.length >= reservation.nombrePlaces) {
       throw new BadRequestException(
         `Cette réservation a déjà ${reservation.nombrePlaces} ticket(s) (une par place)`,
       );
     }
 
-    // Un siège ne peut être occupé qu'une fois sur un même départ.
-    if (siege) {
-      const occupe = await this.prisma.ticket.count({
-        where: {
-          siege,
-          statut: { not: 'annule' },
-          reservation: { departId: reservation.departId },
-        },
-      });
-      if (occupe > 0) {
+    // Sans siège explicite, on prend le prochain siège choisi à la réservation
+    // (choix fait avant paiement) qui n'a pas encore de ticket.
+    let siegeFinal = siege;
+    if (!siegeFinal && reservation.sieges.length > 0) {
+      const dejaEmis = new Set(
+        reservation.tickets
+          .map((t) => t.siege)
+          .filter((s): s is string => s !== null),
+      );
+      siegeFinal = reservation.sieges.find((s) => !dejaEmis.has(s));
+    }
+
+    // Un siège ne peut être occupé qu'une fois sur un même départ (tickets +
+    // sièges retenus par d'autres réservations). On ignore le choix propre à
+    // cette réservation, qu'on est justement en train de matérialiser.
+    if (siegeFinal) {
+      const occupes = await siegesOccupesDepart(
+        this.prisma,
+        reservation.departId,
+        reservationId,
+      );
+      if (occupes.has(siegeFinal)) {
         throw new ConflictException(
-          `Le siège ${siege} est déjà attribué sur ce départ`,
+          `Le siège ${siegeFinal} est déjà attribué sur ce départ`,
         );
       }
     }
 
     const codeQr = randomUUID();
     return this.prisma.ticket.create({
-      data: { reservationId, codeQr, siege },
+      data: { reservationId, codeQr, siege: siegeFinal },
       include: { reservation: { include: { depart: true } } },
     });
   }

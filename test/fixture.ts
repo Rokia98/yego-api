@@ -6,6 +6,8 @@ export interface Fixture {
   autreCompagnieId: number;
   villeA: number;
   villeB: number;
+  // Ville au nom accentué ("Bouaké") pour tester la recherche sans accent.
+  villeC: number;
   trajetId: number;
   departId: number;
   departFuturId: number;
@@ -39,9 +41,10 @@ export async function reinitialiser(prisma: PrismaService): Promise<Fixture> {
 
   const hash = await bcrypt.hash(MDP, 4);
 
-  const [korhogo, abidjan] = await Promise.all([
+  const [korhogo, abidjan, bouake] = await Promise.all([
     prisma.ville.create({ data: { nom: 'Korhogo' } }),
     prisma.ville.create({ data: { nom: 'Abidjan' } }),
+    prisma.ville.create({ data: { nom: 'Bouaké' } }),
   ]);
 
   const compagnie = await prisma.compagnie.create({
@@ -81,13 +84,29 @@ export async function reinitialiser(prisma: PrismaService): Promise<Fixture> {
     },
   });
 
+  const trajetBouake = await prisma.trajet.create({
+    data: {
+      compagnieId: compagnie.id,
+      villeDepartId: abidjan.id,
+      villeArriveeId: bouake.id,
+      heureDepart: heure('07:00'),
+      prix: 8000,
+      statut: 'actif',
+    },
+  });
+
   const dansUnMois = new Date();
   dansUnMois.setMonth(dansUnMois.getMonth() + 1);
+  const dansTroisJours = new Date();
+  dansTroisJours.setDate(dansTroisJours.getDate() + 3);
   const hier = new Date();
   hier.setDate(hier.getDate() - 1);
 
   const departFutur = await prisma.depart.create({
     data: { trajetId: trajet.id, dateDepart: dansUnMois, placesTotales: 50, placesDisponibles: 50, statut: 'planifie' },
+  });
+  await prisma.depart.create({
+    data: { trajetId: trajetBouake.id, dateDepart: dansTroisJours, placesTotales: 50, placesDisponibles: 50, statut: 'planifie' },
   });
   const departProche = await prisma.depart.create({
     data: { trajetId: trajet.id, dateDepart: hier, placesTotales: 50, placesDisponibles: 50, statut: 'planifie' },
@@ -98,6 +117,7 @@ export async function reinitialiser(prisma: PrismaService): Promise<Fixture> {
     autreCompagnieId: autre.id,
     villeA: korhogo.id,
     villeB: abidjan.id,
+    villeC: bouake.id,
     trajetId: trajet.id,
     departId: departProche.id,
     departFuturId: departFutur.id,

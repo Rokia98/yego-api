@@ -1,6 +1,7 @@
 import {
   Injectable,
   BadRequestException,
+  ConflictException,
   NotFoundException,
   ForbiddenException,
 } from '@nestjs/common';
@@ -16,6 +17,7 @@ import {
 import { assertCompagnieScope, peutVoirRessourceVoyageur } from '../../common/scope';
 import { assertCompagnieOperationnelle } from '../../common/compagnie';
 import { paginer } from '../../common/pagination';
+import { siegesOccupesDepart } from '../../common/sieges';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AuthenticatedUser } from '../auth/strategies/jwt.strategy';
 import { CreateReservationDto } from './dto/create-reservation.dto';
@@ -71,6 +73,13 @@ export class ReservationsService {
         throw new BadRequestException('Places insuffisantes pour ce départ');
       }
 
+      const sieges = await this.assertSiegesLibres(
+        tx,
+        dto.departId,
+        dto.nombrePlaces,
+        dto.sieges,
+      );
+
       await tx.depart.update({
         where: { id: dto.departId },
         data: { placesDisponibles: { decrement: dto.nombrePlaces } },
@@ -82,6 +91,7 @@ export class ReservationsService {
           nombrePlaces: dto.nombrePlaces,
           canal: 'en_ligne',
           utilisateurId,
+          sieges,
         },
         include: RESERVATION_INCLUDE,
       });
@@ -122,6 +132,13 @@ export class ReservationsService {
         throw new BadRequestException('Places insuffisantes pour ce départ');
       }
 
+      const sieges = await this.assertSiegesLibres(
+        tx,
+        dto.departId,
+        dto.nombrePlaces,
+        dto.sieges,
+      );
+
       await tx.depart.update({
         where: { id: dto.departId },
         data: { placesDisponibles: { decrement: dto.nombrePlaces } },
@@ -136,6 +153,7 @@ export class ReservationsService {
           agentId: agent.userId,
           passagerNom: dto.passager.nom,
           passagerTelephone: dto.passager.telephone,
+          sieges,
         },
         include: RESERVATION_INCLUDE,
       });
@@ -293,6 +311,31 @@ export class ReservationsService {
     });
 
     return { ...resultat.reservation, remboursement: resultat.remboursement };
+  }
+
+  // Valide les sièges choisis avant paiement : soit aucun (placement libre),
+  // soit exactement `nombrePlaces` sièges, tous libres sur ce départ.
+  // Renvoie la liste à stocker sur la réservation.
+  private async assertSiegesLibres(
+    tx: Prisma.TransactionClient,
+    departId: number,
+    nombrePlaces: number,
+    sieges: string[] | undefined,
+  ): Promise<string[]> {
+    if (!sieges || sieges.length === 0) return [];
+    if (sieges.length !== nombrePlaces) {
+      throw new BadRequestException(
+        `Indiquez exactement ${nombrePlaces} siège(s), ou aucun`,
+      );
+    }
+    const occupes = await siegesOccupesDepart(tx, departId);
+    const collisions = sieges.filter((s) => occupes.has(s));
+    if (collisions.length > 0) {
+      throw new ConflictException(
+        `Siège(s) déjà pris sur ce départ : ${collisions.join(', ')}`,
+      );
+    }
+    return sieges;
   }
 
   // Fraction du montant retenue en frais selon le nombre de jours avant le départ.

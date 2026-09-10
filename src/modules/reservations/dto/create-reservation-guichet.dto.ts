@@ -1,5 +1,8 @@
 import { Transform, Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  ArrayUnique,
+  IsArray,
   IsBoolean,
   IsInt,
   IsOptional,
@@ -11,6 +14,7 @@ import {
   MinLength,
   ValidateNested,
 } from 'class-validator';
+import { SIEGE_REGEX } from '../../../common/sieges';
 
 const TELEPHONE_REGEX = /^\+?[0-9]{8,15}$/;
 
@@ -46,6 +50,18 @@ export class CreateReservationGuichetDto {
   @ValidateNested()
   @Type(() => PassagerGuichetDto)
   passager: PassagerGuichetDto;
+
+  // Sièges attribués au comptoir (un par place), avant l'encaissement.
+  // Optionnel ; si fourni, exactement `nombrePlaces` entrées, toutes libres.
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(10)
+  @ArrayUnique()
+  @Matches(SIEGE_REGEX, {
+    each: true,
+    message: 'Siège invalide (ex. "A1", "12", "B14")',
+  })
+  sieges?: string[];
 
   // true = l'agent encaisse le montant en espèces au guichet : un paiement
   // 'espece' au statut 'paye' est créé dans la même transaction.

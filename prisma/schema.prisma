@@ -231,6 +231,9 @@ model Reservation {
   passagerTelephone String?       @map("passager_telephone")
   departId          Int           @map("depart_id")
   nombrePlaces      Int           @map("nombre_places")
+  // Sièges choisis par le voyageur AVANT le paiement (un par place). Vide si
+  // placement libre. Réutilisés tels quels à la génération des tickets.
+  sieges            String[]      @default([])
   canal             String
   statut            String        @default("confirmee")
   dateReservation   DateTime      @default(now()) @map("date_reservation")

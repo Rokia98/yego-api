@@ -306,6 +306,7 @@ async function main() {
           nombrePlaces: 2,
           canal: 'en_ligne',
           statut: 'confirmee',
+          sieges: ['1', '2'],
         },
       });
       await prisma.depart.update({
@@ -324,8 +325,8 @@ async function main() {
       });
       await prisma.ticket.createMany({
         data: [
-          { reservationId: reservation.id, codeQr: '550e8400-e29b-41d4-a716-446655440000', siege: 'A1', statut: 'valide' },
-          { reservationId: reservation.id, codeQr: '550e8400-e29b-41d4-a716-446655440001', siege: 'A2', statut: 'valide' },
+          { reservationId: reservation.id, codeQr: '550e8400-e29b-41d4-a716-446655440000', siege: '1', statut: 'valide' },
+          { reservationId: reservation.id, codeQr: '550e8400-e29b-41d4-a716-446655440001', siege: '2', statut: 'valide' },
         ],
       });
 
@@ -338,6 +339,7 @@ async function main() {
           nombrePlaces: 1,
           canal: 'guichet',
           statut: 'confirmee',
+          sieges: ['3'],
         },
       });
       await prisma.depart.update({

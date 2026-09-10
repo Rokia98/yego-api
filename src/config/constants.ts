@@ -32,6 +32,14 @@ export enum ReservationStatut {
   EXPIREE = 'expiree',
 }
 
+// Recherche de départs côté voyageur : quand aucune date (ou pas de `dateFin`)
+// n'est fournie, on balaie une fenêtre à partir d'aujourd'hui plutôt que d'exiger
+// un jour exact. La fenêtre est bornée pour éviter les balayages trop larges.
+export const RECHERCHE_DEPART = {
+  FENETRE_DEFAUT_JOURS: 30,
+  FENETRE_MAX_JOURS: 90,
+} as const;
+
 export enum CompagnieStatut {
   EN_ATTENTE = 'en_attente',
   ACTIF = 'actif',

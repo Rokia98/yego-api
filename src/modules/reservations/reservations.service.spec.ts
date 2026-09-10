@@ -1,4 +1,8 @@
-import { ForbiddenException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { ReservationsService } from './reservations.service';
 import { UserRole } from '../../config/constants';
@@ -31,7 +35,9 @@ describe('ReservationsService.creerAuGuichet', () => {
       },
       reservation: {
         create: jest.fn().mockResolvedValue({ id: 100, paiement: null }),
+        findMany: jest.fn().mockResolvedValue([]),
       },
+      ticket: { findMany: jest.fn().mockResolvedValue([]) },
       paiement: { create: jest.fn().mockResolvedValue({ id: 7 }) },
     };
     prisma = {
@@ -97,6 +103,32 @@ describe('ReservationsService.creerAuGuichet', () => {
     );
     const montant = tx.paiement.create.mock.calls[0][0].data.montant;
     expect(montant.toString()).toBe('30000');
+  });
+
+  it('stocke les sièges choisis sur la réservation', async () => {
+    await service.creerAuGuichet({ ...dto, sieges: ['A1', 'A2'] }, agent(1));
+
+    expect(tx.reservation.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ sieges: ['A1', 'A2'] }),
+      }),
+    );
+  });
+
+  it('refuse si le nombre de sièges ne correspond pas aux places (400)', async () => {
+    await expect(
+      service.creerAuGuichet({ ...dto, sieges: ['A1'] }, agent(1)),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(tx.reservation.create).not.toHaveBeenCalled();
+  });
+
+  it('refuse un siège déjà retenu par une autre réservation (409)', async () => {
+    tx.reservation.findMany.mockResolvedValue([{ sieges: ['A1'] }]);
+
+    await expect(
+      service.creerAuGuichet({ ...dto, sieges: ['A1', 'A2'] }, agent(1)),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(tx.reservation.create).not.toHaveBeenCalled();
   });
 });
 

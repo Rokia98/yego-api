@@ -10,6 +10,8 @@ import {
   filtreCompagnieOperationnelle,
 } from '../../common/compagnie';
 import { paginer } from '../../common/pagination';
+import { siegesOccupesDepart } from '../../common/sieges';
+import { RECHERCHE_DEPART } from '../../config/constants';
 import { AuthenticatedUser } from '../auth/strategies/jwt.strategy';
 import { CreateDepartDto } from './dto/create-depart.dto';
 import { UpdateDepartDto } from './dto/update-depart.dto';
@@ -68,27 +70,34 @@ export class DepartsService {
     return depart;
   }
 
-  // Recherche voyageur : ville de départ, ville d'arrivée, date (ou fourchette).
+  // Recherche voyageur : ville de départ, ville d'arrivée, fourchette de dates.
   // Ne renvoie que les départs vendables : compagnie active + abonnement à jour,
   // trajet actif, départ planifié avec des places.
+  // Villes appariées sans tenir compte de la casse NI des accents ("bouake"
+  // trouve "Bouaké"). Dates : voir resoudreFourchette / RECHERCHE_DEPART.
   async rechercher(
     villeDepart: string,
     villeArrivee: string,
-    date: string,
+    date?: string,
     dateFin?: string,
   ) {
-    const dateFilter = dateFin
-      ? { gte: new Date(date), lte: new Date(dateFin) }
-      : new Date(date);
+    const [departId, arriveeId] = await Promise.all([
+      this.resoudreVilleId(villeDepart),
+      this.resoudreVilleId(villeArrivee),
+    ]);
+    if (departId === null || arriveeId === null) return [];
+
+    const { debut, fin } = this.resoudreFourchette(date, dateFin);
+
     return this.prisma.depart.findMany({
       where: {
-        dateDepart: dateFilter,
+        dateDepart: { gte: debut, lte: fin },
         statut: 'planifie',
         placesDisponibles: { gt: 0 },
         trajet: {
           statut: 'actif',
-          villeDepart: { nom: { equals: villeDepart, mode: 'insensitive' } },
-          villeArrivee: { nom: { equals: villeArrivee, mode: 'insensitive' } },
+          villeDepartId: departId,
+          villeArriveeId: arriveeId,
           compagnie: filtreCompagnieOperationnelle(),
         },
       },
@@ -98,8 +107,63 @@ export class DepartsService {
         },
         vehicule: true,
       },
-      orderBy: { trajet: { heureDepart: 'asc' } },
+      orderBy: [{ dateDepart: 'asc' }, { trajet: { heureDepart: 'asc' } }],
     });
+  }
+
+  // Résout un nom de ville en id, insensible à la casse et aux accents
+  // (extension Postgres `unaccent`). Renvoie null si aucune ville ne correspond.
+  private async resoudreVilleId(nom: string): Promise<number | null> {
+    const lignes = await this.prisma.$queryRaw<{ id: number }[]>`
+      SELECT id FROM villes
+      WHERE unaccent(lower(nom)) = unaccent(lower(${nom}))
+      LIMIT 1
+    `;
+    return lignes[0]?.id ?? null;
+  }
+
+  // `date` absente → aujourd'hui (00:00). `dateFin` absente → date + fenêtre par
+  // défaut. La fenêtre est bornée à FENETRE_MAX_JOURS.
+  private resoudreFourchette(date?: string, dateFin?: string) {
+    const debut = date ? new Date(date) : new Date();
+    debut.setHours(0, 0, 0, 0);
+
+    const maxFin = new Date(debut);
+    maxFin.setDate(maxFin.getDate() + RECHERCHE_DEPART.FENETRE_MAX_JOURS);
+
+    let fin: Date;
+    if (dateFin) {
+      fin = new Date(dateFin);
+      fin.setHours(23, 59, 59, 999);
+      if (fin > maxFin) fin = maxFin;
+    } else {
+      fin = new Date(debut);
+      fin.setDate(fin.getDate() + RECHERCHE_DEPART.FENETRE_DEFAUT_JOURS);
+    }
+    return { debut, fin };
+  }
+
+  // Plan de salle côté voyageur avant réservation : sièges déjà pris sur ce
+  // départ (tickets émis + sièges retenus par les réservations confirmées, le
+  // choix se faisant avant paiement).
+  async sieges(id: number) {
+    const depart = await this.prisma.depart.findUnique({
+      where: { id },
+      select: {
+        placesTotales: true,
+        placesDisponibles: true,
+        vehicule: { select: { capacite: true } },
+      },
+    });
+    if (!depart) throw new NotFoundException(`Départ ${id} introuvable`);
+
+    const occupes = await siegesOccupesDepart(this.prisma, id);
+
+    return {
+      placesTotales: depart.vehicule?.capacite ?? depart.placesTotales,
+      placesDisponibles: depart.placesDisponibles,
+      occupes: [...occupes].sort(),
+    };
   }
 
   async update(id: number, dto: UpdateDepartDto, user: AuthenticatedUser) {
