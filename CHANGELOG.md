@@ -1,5 +1,26 @@
 # Changelog - Yègo API
 
+## [0.21.0] - 2026-09-10
+
+### 📈 Série temporelle du dashboard
+- `GET /dashboard/series?from&to&compagnieId&granularite=jour` (perm
+  `dashboard:read`, auto-scopé company_admin comme le reste de `/dashboard/*`) :
+  un point **par jour** de la période, jours vides inclus avec des zéros.
+  `[{ date, reservations, placesVendues, revenu (string), parCanal:{en_ligne,
+  guichet} }]`. Base = `reservation.dateReservation` (date de vente). Fenêtre
+  bornée à `DASHBOARD.SERIE_MAX_JOURS` (92 j).
+
+### 🚌 Suivi GPS — accès resserré
+- `GET /departs/:id/suivi` et `/suivi/historique` : le voyageur doit avoir une
+  réservation **`confirmee`** sur le départ (une résa annulée / expirée ne
+  donne plus accès au suivi temps réel → 403).
+- Les notifications `depart.*` ne visaient déjà que les réservations
+  `confirmee` (via `notifierVoyageursDeparts`).
+
+### 🌱 Seed
+- Tous les trajets du seed ont désormais une `heureArriveeEstimee` réaliste
+  (trajets de nuit gérés) → l'ETA du suivi calcule le retard vs l'horaire prévu.
+
 ## [0.20.0] - 2026-09-10
 
 ### 🔔 Notifications de changement d'horaire et de retard

@@ -81,6 +81,9 @@ async function main() {
     de: string;
     vers: string;
     heure: string;
+    // Heure d'arrivée estimée (HH:MM). Sert à l'ETA / détection de retard du
+    // suivi GPS. Peut être « avant » l'heure de départ pour un trajet de nuit.
+    arrivee: string;
     prix: number;
     jours?: string;
   }
@@ -109,8 +112,8 @@ async function main() {
       immatriculation: 'CI-1234-AB',
       chauffeur: 'Koffi Yao',
       routes: [
-        { de: 'Korhogo', vers: 'Abidjan', heure: '08:00', prix: 15000, jours: 'lun,mar,mer,jeu,ven' },
-        { de: 'Abidjan', vers: 'Korhogo', heure: '17:00', prix: 15000, jours: 'lun,mar,mer,jeu,ven,sam,dim' },
+        { de: 'Korhogo', vers: 'Abidjan', heure: '08:00', arrivee: '17:30', prix: 15000, jours: 'lun,mar,mer,jeu,ven' },
+        { de: 'Abidjan', vers: 'Korhogo', heure: '17:00', arrivee: '02:30', prix: 15000, jours: 'lun,mar,mer,jeu,ven,sam,dim' },
       ],
     },
     {
@@ -124,9 +127,9 @@ async function main() {
       immatriculation: 'CI-2201-UB',
       chauffeur: 'Ibrahim Traoré',
       routes: [
-        { de: 'Abidjan', vers: 'Bouaké', heure: '07:00', prix: 6000, jours: 'lun,mar,mer,jeu,ven,sam,dim' },
-        { de: 'Bouaké', vers: 'Korhogo', heure: '13:00', prix: 5000, jours: 'lun,mer,ven,sam' },
-        { de: 'Abidjan', vers: 'Korhogo', heure: '06:30', prix: 12000, jours: 'lun,mar,mer,jeu,ven,sam,dim' },
+        { de: 'Abidjan', vers: 'Bouaké', heure: '07:00', arrivee: '11:30', prix: 6000, jours: 'lun,mar,mer,jeu,ven,sam,dim' },
+        { de: 'Bouaké', vers: 'Korhogo', heure: '13:00', arrivee: '17:15', prix: 5000, jours: 'lun,mer,ven,sam' },
+        { de: 'Abidjan', vers: 'Korhogo', heure: '06:30', arrivee: '15:30', prix: 12000, jours: 'lun,mar,mer,jeu,ven,sam,dim' },
       ],
     },
     {
@@ -140,9 +143,9 @@ async function main() {
       immatriculation: 'CI-3308-CH',
       chauffeur: 'Adama Ouattara',
       routes: [
-        { de: 'Abidjan', vers: 'Korhogo', heure: '09:00', prix: 13000, jours: 'lun,mar,mer,jeu,ven,sam,dim' },
-        { de: 'Korhogo', vers: 'Ferkessédougou', heure: '15:00', prix: 3000, jours: 'lun,mer,ven' },
-        { de: 'Korhogo', vers: 'Abidjan', heure: '19:00', prix: 13000, jours: 'lun,mar,mer,jeu,ven,sam,dim' },
+        { de: 'Abidjan', vers: 'Korhogo', heure: '09:00', arrivee: '18:00', prix: 13000, jours: 'lun,mar,mer,jeu,ven,sam,dim' },
+        { de: 'Korhogo', vers: 'Ferkessédougou', heure: '15:00', arrivee: '16:15', prix: 3000, jours: 'lun,mer,ven' },
+        { de: 'Korhogo', vers: 'Abidjan', heure: '19:00', arrivee: '04:00', prix: 13000, jours: 'lun,mar,mer,jeu,ven,sam,dim' },
       ],
     },
     {
@@ -156,9 +159,9 @@ async function main() {
       immatriculation: 'CI-4415-GT',
       chauffeur: 'Serge Kouamé',
       routes: [
-        { de: 'Abidjan', vers: 'Man', heure: '07:30', prix: 8000, jours: 'lun,mar,mer,jeu,ven,sam,dim' },
-        { de: 'Abidjan', vers: 'Daloa', heure: '08:30', prix: 6500, jours: 'lun,mar,mer,jeu,ven,sam,dim' },
-        { de: 'Abidjan', vers: 'Yamoussoukro', heure: '10:00', prix: 3500, jours: 'lun,mar,mer,jeu,ven,sam,dim' },
+        { de: 'Abidjan', vers: 'Man', heure: '07:30', arrivee: '15:30', prix: 8000, jours: 'lun,mar,mer,jeu,ven,sam,dim' },
+        { de: 'Abidjan', vers: 'Daloa', heure: '08:30', arrivee: '14:00', prix: 6500, jours: 'lun,mar,mer,jeu,ven,sam,dim' },
+        { de: 'Abidjan', vers: 'Yamoussoukro', heure: '10:00', arrivee: '13:15', prix: 3500, jours: 'lun,mar,mer,jeu,ven,sam,dim' },
       ],
     },
     {
@@ -172,8 +175,8 @@ async function main() {
       immatriculation: 'CI-5522-AV',
       chauffeur: 'Moussa Diarra',
       routes: [
-        { de: 'Abidjan', vers: 'San-Pédro', heure: '06:00', prix: 7000, jours: 'lun,mar,mer,jeu,ven,sam,dim' },
-        { de: 'San-Pédro', vers: 'Abidjan', heure: '14:00', prix: 7000, jours: 'lun,mar,mer,jeu,ven,sam,dim' },
+        { de: 'Abidjan', vers: 'San-Pédro', heure: '06:00', arrivee: '11:30', prix: 7000, jours: 'lun,mar,mer,jeu,ven,sam,dim' },
+        { de: 'San-Pédro', vers: 'Abidjan', heure: '14:00', arrivee: '19:30', prix: 7000, jours: 'lun,mar,mer,jeu,ven,sam,dim' },
       ],
     },
   ];
@@ -270,6 +273,7 @@ async function main() {
           villeDepartId: villes[route.de].id,
           villeArriveeId: villes[route.vers].id,
           heureDepart: heure(route.heure),
+          heureArriveeEstimee: heure(route.arrivee),
           prix: route.prix,
           joursRecurrence: route.jours ?? 'lun,mar,mer,jeu,ven,sam,dim',
           statut: 'actif',

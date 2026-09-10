@@ -356,18 +356,19 @@ export class SuiviService {
     ) {
       return;
     }
-    // Voyageur : doit avoir une réservation sur ce départ.
+    // Voyageur : doit avoir une réservation CONFIRMÉE sur ce départ. Une résa
+    // annulée / expirée ne donne plus accès au suivi temps réel.
     const resa = await this.prisma.reservation.findFirst({
       where: {
         departId: depart.id,
         utilisateurId: user.userId,
-        statut: { in: ['confirmee', 'annulee'] },
+        statut: 'confirmee',
       },
       select: { id: true },
     });
     if (!resa) {
       throw new ForbiddenException(
-        "Vous n'avez pas de réservation sur ce départ",
+        "Vous n'avez pas de réservation confirmée sur ce départ",
       );
     }
   }

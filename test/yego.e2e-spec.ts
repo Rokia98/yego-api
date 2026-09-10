@@ -685,6 +685,27 @@ describe('Yègo API (e2e)', () => {
         .set(auth('admin'))
         .expect(200)
         .then((r) => expect(Array.isArray(r.body)).toBe(true)));
+
+    it('série journalière : un point par jour, jours vides à zéro (gestionnaire)', () =>
+      http()
+        .get('/api/v1/dashboard/series?from=2026-09-01&to=2026-09-05')
+        .set(auth('gestionnaire'))
+        .expect(200)
+        .then((r) => {
+          expect(r.body).toHaveLength(5);
+          expect(r.body[0]).toMatchObject({
+            date: '2026-09-01',
+            reservations: expect.any(Number),
+            revenu: expect.any(String),
+            parCanal: { en_ligne: expect.any(Number), guichet: expect.any(Number) },
+          });
+        }));
+
+    it('série : un agent (403)', () =>
+      http()
+        .get('/api/v1/dashboard/series')
+        .set(auth('agent'))
+        .expect(403));
   });
 
   // ---------------------------------------------------------------------------
