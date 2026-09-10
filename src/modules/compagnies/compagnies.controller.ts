@@ -20,6 +20,7 @@ import { CompagniesService } from './compagnies.service';
 import { CreateCompagnieDto } from './dto/create-compagnie.dto';
 import { UpdateCompagnieDto } from './dto/update-compagnie.dto';
 import { ModererCompagnieDto } from './dto/moderer-compagnie.dto';
+import { CreerCompteAdminDto } from './dto/creer-compte-admin.dto';
 
 @Controller('compagnies')
 export class CompagniesController {
@@ -62,6 +63,18 @@ export class CompagniesController {
     @Body() dto: UpdateCompagnieDto,
   ) {
     return this.compagniesService.update(id, dto, user);
+  }
+
+  // Crée / régénère le compte gestionnaire d'une compagnie : admin plateforme.
+  // Renvoie le mot de passe temporaire (à transmettre au gestionnaire).
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.COMPAGNIE_CREATE)
+  @Post(':id/compte-admin')
+  creerCompteAdmin(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: CreerCompteAdminDto,
+  ) {
+    return this.compagniesService.creerCompteAdmin(id, dto);
   }
 
   // Activation / suspension d'une compagnie : admin plateforme uniquement.

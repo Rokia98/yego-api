@@ -1,4 +1,5 @@
 import { IsEmail, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { EstLogoValide } from '../../../common/validators/logo.validator';
 
 // Le statut n'est PAS modifiable ici : c'est une action de modération réservée
 // à l'admin plateforme (PATCH /compagnies/:id/statut).
@@ -18,8 +19,10 @@ export class UpdateCompagnieDto {
   @IsEmail()
   email?: string;
 
+  // URL http(s) OU data:image/(png|jpeg|webp);base64 (≤ 40 Ko décodé).
   @IsOptional()
   @IsString()
-  @MaxLength(500)
+  @MaxLength(50000)
+  @EstLogoValide()
   logoUrl?: string;
 }

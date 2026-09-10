@@ -4,13 +4,19 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../prisma.service';
 import { assertCompagnieScope } from '../../common/scope';
 import { paginer } from '../../common/pagination';
+import { genererMotDePasse } from '../../common/motdepasse';
+import { UserRole } from '../../config/constants';
 import { AuthenticatedUser } from '../auth/strategies/jwt.strategy';
 import { CreateCompagnieDto } from './dto/create-compagnie.dto';
 import { UpdateCompagnieDto } from './dto/update-compagnie.dto';
 import { ModererCompagnieDto } from './dto/moderer-compagnie.dto';
+import { CreerCompteAdminDto } from './dto/creer-compte-admin.dto';
+
+const BCRYPT_ROUNDS = 12;
 
 // Pas d'abonnements ici : infos de facturation réservées à /abonnements
 // (admin / company_admin). GET /compagnies est public.
@@ -72,6 +78,59 @@ export class CompagniesService {
       where: { id },
       data: { statut: dto.statut },
     });
+  }
+
+  // Crée (ou régénère le mot de passe) du compte gestionnaire d'une compagnie.
+  // Réservé à l'admin plateforme (perm compagnie:create sur le contrôleur).
+  // Le mot de passe temporaire n'est renvoyé qu'ici, une seule fois.
+  async creerCompteAdmin(id: number, dto: CreerCompteAdminDto) {
+    await this.assertExiste(id);
+
+    const motDePasse = genererMotDePasse();
+    const motDePasseHash = await bcrypt.hash(motDePasse, BCRYPT_ROUNDS);
+
+    const existant = await this.prisma.utilisateur.findUnique({
+      where: { telephone: dto.telephone },
+      select: { id: true, role: true, compagnieId: true },
+    });
+
+    if (existant) {
+      const estAdminDeCetteCompagnie =
+        existant.role === UserRole.COMPANY_ADMIN &&
+        existant.compagnieId === id;
+      if (!estAdminDeCetteCompagnie) {
+        throw new ConflictException(
+          'Ce numéro est déjà rattaché à un autre compte',
+        );
+      }
+      // Régénération : nouveau mot de passe + invalidation des sessions en cours.
+      const maj = await this.prisma.utilisateur.update({
+        where: { id: existant.id },
+        data: {
+          nom: dto.nom,
+          email: dto.email,
+          motDePasseHash,
+          actif: true,
+          tokenVersion: { increment: 1 },
+        },
+        select: { id: true, nom: true, telephone: true },
+      });
+      return { ...maj, motDePasseTemporaire: motDePasse };
+    }
+
+    const cree = await this.prisma.utilisateur.create({
+      data: {
+        nom: dto.nom,
+        telephone: dto.telephone,
+        email: dto.email,
+        motDePasseHash,
+        role: UserRole.COMPANY_ADMIN,
+        compagnieId: id,
+        actif: true,
+      },
+      select: { id: true, nom: true, telephone: true },
+    });
+    return { ...cree, motDePasseTemporaire: motDePasse };
   }
 
   async delete(id: number) {

@@ -15,8 +15,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { SIEGE_REGEX } from '../../../common/sieges';
-
-const TELEPHONE_REGEX = /^\+?[0-9]{8,15}$/;
+import { TelephoneNormalise } from '../../../common/decorators/telephone-normalise.decorator';
 
 // Le voyageur au guichet n'a pas de compte : on note seulement son identité
 // sur la réservation (liste des passagers).
@@ -29,12 +28,7 @@ class PassagerGuichetDto {
 
   @IsOptional()
   @IsString()
-  @Transform(({ value }) =>
-    typeof value === 'string' ? value.replace(/\s+/g, '') : value,
-  )
-  @Matches(TELEPHONE_REGEX, {
-    message: 'Numéro de téléphone invalide (8 à 15 chiffres, "+" optionnel)',
-  })
+  @TelephoneNormalise()
   telephone?: string;
 }
 

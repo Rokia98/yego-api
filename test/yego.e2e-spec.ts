@@ -81,6 +81,24 @@ describe('Yègo API (e2e)', () => {
         .expect(401);
       rtok.voyageur = r.body.refreshToken;
     });
+
+    it('normalise le téléphone : register saisi en 10 chiffres → stocké en +225…', async () => {
+      const reg = await http()
+        .post('/api/v1/auth/register')
+        .send({
+          nom: 'Kone',
+          telephone: '07 12 34 56 78',
+          motDePasse: 'MotDePasseTest1',
+        })
+        .expect(201);
+      expect(reg.body.telephone).toBe('+2250712345678');
+    });
+
+    it('rejette un téléphone non normalisable (400)', () =>
+      http()
+        .post('/api/v1/auth/register')
+        .send({ nom: 'Bad', telephone: 'abc123', motDePasse: 'MotDePasseTest1' })
+        .expect(400));
   });
 
   // ---------------------------------------------------------------------------
@@ -199,6 +217,72 @@ describe('Yègo API (e2e)', () => {
       expect(Array.isArray(r.body)).toBe(true);
       expect(r.body.length).toBeLessThanOrEqual(100);
     });
+  });
+
+  // ---------------------------------------------------------------------------
+  describe('Compagnie : logo + compte gestionnaire', () => {
+    const logoData =
+      'data:image/png;base64,' + 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB'.repeat(4);
+    let compagnieId: number;
+
+    it('POST /compagnies accepte un logo data-URI et le conserve en liste', async () => {
+      const c = await http()
+        .post('/api/v1/compagnies')
+        .set(auth('admin'))
+        .send({ nom: 'Test Logo SARL', logoUrl: logoData })
+        .expect(201);
+      compagnieId = c.body.id;
+      expect(c.body.logoUrl).toBe(logoData);
+
+      const liste = await http().get('/api/v1/compagnies?take=100').expect(200);
+      const trouve = liste.body.find((x: any) => x.id === compagnieId);
+      expect(trouve.logoUrl).toBe(logoData);
+    });
+
+    it('POST /compagnies refuse un logo data-URI non-image (400)', () =>
+      http()
+        .post('/api/v1/compagnies')
+        .set(auth('admin'))
+        .send({ nom: 'Mauvais Logo', logoUrl: 'data:text/html;base64,AAAA' })
+        .expect(400));
+
+    it('POST /compagnies/:id/compte-admin crée le gestionnaire + mot de passe temporaire', async () => {
+      const r = await http()
+        .post(`/api/v1/compagnies/${compagnieId}/compte-admin`)
+        .set(auth('admin'))
+        .send({ nom: 'Gérant Test', telephone: '07 88 00 11 22' })
+        .expect(201);
+      expect(r.body).toMatchObject({
+        nom: 'Gérant Test',
+        telephone: '+2250788001122',
+      });
+      expect(typeof r.body.motDePasseTemporaire).toBe('string');
+      expect(r.body.motDePasseTemporaire.length).toBeGreaterThanOrEqual(12);
+
+      // le compte a bien été créé, rattaché à la compagnie, rôle gestionnaire
+      const gestionnaires = await http()
+        .get(`/api/v1/compagnies/${compagnieId}`)
+        .expect(200);
+      expect(gestionnaires.body.utilisateurs).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ telephone: '+2250788001122' }),
+        ]),
+      );
+    });
+
+    it('compte-admin : 409 si le numéro est déjà rattaché à un autre compte', () =>
+      http()
+        .post(`/api/v1/compagnies/${compagnieId}/compte-admin`)
+        .set(auth('admin'))
+        .send({ nom: 'Gérant Bis', telephone: fx.comptes.gestionnaire.telephone })
+        .expect(409));
+
+    it('compte-admin : 403 pour un non-admin', () =>
+      http()
+        .post(`/api/v1/compagnies/${compagnieId}/compte-admin`)
+        .set(auth('gestionnaire'))
+        .send({ nom: 'Gérant Ter', telephone: '0788445566' })
+        .expect(403));
   });
 
   // ---------------------------------------------------------------------------

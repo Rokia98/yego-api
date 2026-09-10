@@ -1,16 +1,10 @@
 import { Transform } from 'class-transformer';
-import {
-  IsEmail,
-  IsInt,
-  IsOptional,
-  IsPositive,
-  IsString,
-  MaxLength,
-  MinLength,
-} from 'class-validator';
+import { IsEmail, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 import { TelephoneNormalise } from '../../../common/decorators/telephone-normalise.decorator';
 
-export class CreateAgentDto {
+// Création (ou régénération du mot de passe) du compte gestionnaire d'une
+// compagnie, par l'administrateur plateforme.
+export class CreerCompteAdminDto {
   @IsString()
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @MinLength(2)
@@ -25,15 +19,4 @@ export class CreateAgentDto {
   @IsEmail()
   @MaxLength(160)
   email?: string;
-
-  @IsString()
-  @MinLength(8)
-  @MaxLength(72)
-  motDePasse: string;
-
-  // Ignoré pour un company_admin (forcé à sa compagnie) ; requis pour l'admin.
-  @IsOptional()
-  @IsInt()
-  @IsPositive()
-  compagnieId?: number;
 }

@@ -190,6 +190,11 @@ async function main() {
         nom: def.nom,
         telephone: def.telephone,
         email: def.email,
+        // Logo monogramme généré à la volée (URL absolue) — l'app affiche
+        // l'image ou retombe sur son propre monogramme si l'URL échoue.
+        logoUrl: `https://ui-avatars.com/api/?name=${encodeURIComponent(
+          def.code,
+        )}&background=F97316&color=fff&size=128&bold=true`,
         statut: 'actif',
       },
     });

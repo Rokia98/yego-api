@@ -3,13 +3,10 @@ import {
   IsEmail,
   IsOptional,
   IsString,
-  Matches,
   MaxLength,
   MinLength,
 } from 'class-validator';
-
-// Format E.164 souple : '+' optionnel puis 8 à 15 chiffres.
-const TELEPHONE_REGEX = /^\+?[0-9]{8,15}$/;
+import { TelephoneNormalise } from '../../../common/decorators/telephone-normalise.decorator';
 
 export class RegisterDto {
   @IsString()
@@ -19,12 +16,7 @@ export class RegisterDto {
   nom: string;
 
   @IsString()
-  @Transform(({ value }) =>
-    typeof value === 'string' ? value.replace(/\s+/g, '') : value,
-  )
-  @Matches(TELEPHONE_REGEX, {
-    message: 'Numéro de téléphone invalide (8 à 15 chiffres, "+" optionnel)',
-  })
+  @TelephoneNormalise()
   telephone: string;
 
   @IsOptional()

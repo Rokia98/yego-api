@@ -1,5 +1,33 @@
 # Changelog - Yègo API
 
+## [0.22.0] - 2026-09-10
+
+### 📞 Normalisation des numéros de téléphone (E.164)
+- Toute saisie de numéro est ramenée à la forme canonique `+225XXXXXXXXXX`
+  avant stockage / usage comme identifiant : `common/telephone.ts`
+  (`normaliserTelephone`) + décorateur `@TelephoneNormalise()` appliqué aux DTO
+  `register`, `login`, `create-utilisateur`, `create/update-agent`,
+  `create/update-chauffeur`, passager guichet. `07 01 02 03 04`,
+  `0701020304`, `225…` → `+2250701020304`.
+- Migration `20260910140000_telephone_e164` : préfixe `+225` les comptes
+  `utilisateurs` stockés au format local nu (10 chiffres commençant par 0).
+
+### 🏢 Logo de compagnie
+- `CreateCompagnieDto` accepte `logoUrl` ; validateur `EstLogoValide` : URL
+  http(s) **ou** `data:image/(png|jpeg|webp);base64` ≤ 40 Ko décodé.
+  `@MaxLength(50000)` sur les deux DTO. `logoUrl` conservé dans `GET /compagnies`.
+- Seed : chaque compagnie reçoit un logo monogramme (URL absolue).
+
+### 👤 Compte gestionnaire d'une compagnie
+- `POST /compagnies/:id/compte-admin` (perm `compagnie:create`, admin
+  plateforme) `{ nom, telephone, email? }` → `{ id, nom, telephone,
+  motDePasseTemporaire }` (mot de passe en clair renvoyé **une seule fois**).
+  - 404 si compagnie inconnue.
+  - Numéro déjà gestionnaire de CETTE compagnie → régénère le mot de passe
+    (+ `tokenVersion++`). Numéro rattaché ailleurs → 409.
+  - Générateur `common/motdepasse.ts` : 12 caractères, alphabet sans ambigus,
+    `crypto.randomInt`, bcrypt cost 12.
+
 ## [0.21.1] - 2026-09-10
 
 ### 💺 Plan de salle plus lisible

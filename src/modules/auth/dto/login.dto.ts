@@ -1,12 +1,9 @@
-import { Transform } from 'class-transformer';
 import { IsString, MaxLength } from 'class-validator';
+import { TelephoneNormalise } from '../../../common/decorators/telephone-normalise.decorator';
 
 export class LoginDto {
   @IsString()
-  @Transform(({ value }) =>
-    typeof value === 'string' ? value.replace(/\s+/g, '') : value,
-  )
-  @MaxLength(16)
+  @TelephoneNormalise()
   telephone: string;
 
   @IsString()
