@@ -31,6 +31,37 @@ const RESERVATION_COMPAGNIE = {
   },
 };
 
+// Champs voyageur sûrs (jamais motDePasseHash / tokenVersion / …).
+const UTILISATEUR_SAFE_SELECT = {
+  id: true,
+  nom: true,
+  telephone: true,
+  email: true,
+  role: true,
+};
+
+// Include enrichi pour les listes : identité du voyageur + trajet lisible,
+// pour l'affichage back-office (page « remboursements à confirmer »).
+const RESERVATION_LISTE = {
+  reservation: {
+    include: {
+      utilisateur: { select: UTILISATEUR_SAFE_SELECT },
+      agent: { select: UTILISATEUR_SAFE_SELECT },
+      depart: {
+        include: {
+          trajet: {
+            include: {
+              villeDepart: { select: { nom: true } },
+              villeArrivee: { select: { nom: true } },
+              compagnie: { select: { id: true, nom: true } },
+            },
+          },
+        },
+      },
+    },
+  },
+};
+
 @Injectable()
 export class RemboursementsService {
   constructor(
@@ -173,7 +204,7 @@ export class RemboursementsService {
     return this.prisma.remboursement.findMany({
       where: this.filtrePortee(user),
       ...paginer(skip, take),
-      include: { reservation: true },
+      include: RESERVATION_LISTE,
       orderBy: { dateDemande: 'desc' },
     });
   }
@@ -187,7 +218,7 @@ export class RemboursementsService {
     return this.prisma.remboursement.findMany({
       where: { statut, ...this.filtrePortee(user) },
       ...paginer(skip, take),
-      include: { reservation: true },
+      include: RESERVATION_LISTE,
       orderBy: { dateDemande: 'desc' },
     });
   }

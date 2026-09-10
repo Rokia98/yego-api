@@ -262,6 +262,26 @@ describe('Yègo API (e2e)', () => {
       expect(r.body.remboursement).toBeTruthy();
       expect(Number(r.body.remboursement.fraisRetenus)).toBeGreaterThan(0);
     });
+
+    it('GET /remboursements/statut/en_attente : réservation enrichie (voyageur + trajet)', () =>
+      http()
+        .get('/api/v1/remboursements/statut/en_attente')
+        .set(auth('gestionnaire'))
+        .expect(200)
+        .then((r) => {
+          expect(Array.isArray(r.body)).toBe(true);
+          const remb = r.body.find(
+            (x: any) => x.reservation?.id === reservationId,
+          );
+          expect(remb).toBeTruthy();
+          expect(remb.reservation.depart.trajet.villeArrivee.nom).toEqual(
+            expect.any(String),
+          );
+          // résa au guichet (passagerNom) ou en ligne (utilisateur) — au moins l'un
+          expect(
+            remb.reservation.utilisateur ?? remb.reservation.passagerNom,
+          ).toBeTruthy();
+        }));
   });
 
   // ---------------------------------------------------------------------------
