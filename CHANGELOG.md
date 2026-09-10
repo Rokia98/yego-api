@@ -1,5 +1,26 @@
 # Changelog - Yègo API
 
+## [0.18.0] - 2026-09-10
+
+### 🔐 Validation des tickets hors-ligne (QR signés)
+- Le `codeQr` d'un ticket devient un **jeton signé Ed25519**
+  `YEGO1.<charge>.<signature>` (charge = ticketId, reservationId, departId,
+  compagnieId, siège, date de départ). Signature faite avec la clé privée du
+  serveur, vérifiable avec la clé publique — donc **hors-ligne**.
+- `GET /tickets/cle-publique` (public) : clé publique PEM + algo.
+- `GET /tickets/depart/:departId/manifeste` (perm `ticket:validate`, cloisonné
+  compagnie) : clé publique + liste des tickets du départ avec leur `statut`
+  (pour repérer les révocations `annule` / `utilise`). Le contrôleur le met en
+  cache tant qu'il a du réseau.
+- `POST /tickets/validations/sync` (perm `ticket:validate`) : rejoue un lot de
+  scans faits hors-ligne (`{ scans: [{ codeQr, scanneA?, resultatLocal? }] }`).
+  Chaque scan repasse par `valider()` — premier succès ⇒ `utilise`, doublon ⇒
+  `deja_utilise` (conflit entre deux contrôleurs). Audit `source: sync_hors_ligne`.
+- `POST /tickets/valider/:codeQr` : rejette immédiatement (`signature_invalide`)
+  un jeton signé dont la signature ne se vérifie pas, sans toucher la base.
+- `TICKET_SIGNING_PRIVATE_KEY` (env, optionnel) : clé Ed25519 PEM PKCS#8. Absente
+  ⇒ paire éphémère régénérée au démarrage (dev), avec avertissement.
+
 ## [0.17.0] - 2026-09-04
 
 ### 📊 Module dashboard

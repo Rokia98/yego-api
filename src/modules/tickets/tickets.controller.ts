@@ -18,10 +18,18 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AuthenticatedUser } from '../auth/strategies/jwt.strategy';
 import { TicketsService } from './tickets.service';
 import { GenererTicketDto } from './dto/generer-ticket.dto';
+import { SyncValidationsDto } from './dto/sync-validations.dto';
 
 @Controller('tickets')
 export class TicketsController {
   constructor(private ticketsService: TicketsService) {}
+
+  // Clé publique de vérification des QR (validation hors-ligne). Publique.
+  // Déclarée AVANT ':id'.
+  @Get('cle-publique')
+  clePublique() {
+    return this.ticketsService.clePublique();
+  }
 
   @UseGuards(JwtAuthGuard)
   @Get()
@@ -58,6 +66,34 @@ export class TicketsController {
       Number(skip),
       Number(take),
     );
+  }
+
+  // Manifeste d'un départ pour le contrôle hors-ligne. Déclaré AVANT ':id'.
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.TICKET_VALIDATE)
+  @Get('depart/:departId/manifeste')
+  manifesteDepart(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('departId', ParseIntPipe) departId: number,
+  ) {
+    return this.ticketsService.manifesteDepart(departId, user);
+  }
+
+  // Rejoue un lot de scans faits hors-ligne. Déclaré AVANT ':id'.
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.TICKET_VALIDATE)
+  @Post('validations/sync')
+  synchroniserValidations(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: SyncValidationsDto,
+    @Ip() ip: string,
+  ) {
+    return this.ticketsService.synchroniserValidations(dto.scans, {
+      userId: user.userId,
+      role: user.role,
+      compagnieId: user.compagnieId,
+      ip,
+    });
   }
 
   @UseGuards(JwtAuthGuard)

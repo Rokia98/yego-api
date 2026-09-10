@@ -13,6 +13,12 @@ import { UserRole } from '../../config/constants';
 import { peutVoirRessourceVoyageur } from '../../common/scope';
 import { paginer } from '../../common/pagination';
 import { siegesOccupesDepart } from '../../common/sieges';
+import {
+  clePubliquePem,
+  estJetonSigne,
+  signerTicket,
+  verifierTicket,
+} from '../../common/ticket-signature';
 import { AuthenticatedUser } from '../auth/strategies/jwt.strategy';
 
 export interface ActeurContexte {
@@ -20,6 +26,9 @@ export interface ActeurContexte {
   role?: string;
   compagnieId?: number | null;
   ip?: string;
+  // Champs supplémentaires à joindre au journal d'audit (ex. horodatage du
+  // scan hors-ligne lors d'une synchronisation).
+  metaExtra?: Record<string, unknown>;
 }
 
 const RESERVATION_AVEC_COMPAGNIE = {
@@ -101,11 +110,38 @@ export class TicketsService {
       }
     }
 
-    const codeQr = randomUUID();
-    return this.prisma.ticket.create({
-      data: { reservationId, codeQr, siege: siegeFinal },
-      include: { reservation: { include: { depart: true } } },
+    // Le codeQr est un jeton signé (Ed25519) qui embarque de quoi le vérifier
+    // hors-ligne au contrôle. Il contient l'id du ticket : on crée d'abord la
+    // ligne, puis on la signe et on remplace le codeQr (transaction atomique).
+    const dateDepart = reservation.depart.dateDepart.toISOString().slice(0, 10);
+    return this.prisma.$transaction(async (tx) => {
+      const cree = await tx.ticket.create({
+        data: {
+          reservationId,
+          codeQr: `provisoire-${randomUUID()}`,
+          siege: siegeFinal ?? null,
+        },
+      });
+      const codeQr = signerTicket({
+        t: cree.id,
+        r: reservationId,
+        d: reservation.departId,
+        c: reservation.depart.trajet.compagnieId,
+        s: siegeFinal ?? null,
+        dd: dateDepart,
+      });
+      return tx.ticket.update({
+        where: { id: cree.id },
+        data: { codeQr },
+        include: { reservation: { include: { depart: true } } },
+      });
     });
+  }
+
+  // Clé publique de vérification des QR — le contrôleur la met en cache pour
+  // valider les tickets sans réseau.
+  clePublique() {
+    return { algo: 'ed25519', clePublique: clePubliquePem() };
   }
 
   async findByReservation(reservationId: number, user: AuthenticatedUser) {
@@ -147,6 +183,27 @@ export class TicketsService {
   // Un agent/company_admin ne valide que les tickets de SA compagnie ;
   // l'admin plateforme, tous. Chaque tentative est journalisée (audit).
   async valider(codeQr: string, ctx?: ActeurContexte) {
+    const journaliserTot = (resultat: string) =>
+      this.audit.record({
+        action: 'ticket.validation',
+        entite: 'ticket',
+        entiteId: null,
+        acteurId: ctx?.userId,
+        acteurRole: ctx?.role,
+        ip: ctx?.ip,
+        metadata: { codeQr, resultat, ...ctx?.metaExtra },
+      });
+
+    // QR au format jeton signé : on rejette tout de suite une signature
+    // invalide (QR falsifié / illisible) sans même toucher la base.
+    if (estJetonSigne(codeQr)) {
+      const verif = verifierTicket(codeQr);
+      if (!verif.valide) {
+        await journaliserTot('signature_invalide');
+        return { valide: false, message: 'QR invalide (signature non vérifiée)' };
+      }
+    }
+
     const ticket = await this.prisma.ticket.findUnique({
       where: { codeQr },
       include: RESERVATION_AVEC_COMPAGNIE,
@@ -166,7 +223,7 @@ export class TicketsService {
         acteurId: ctx.userId,
         acteurRole: ctx.role,
         ip: ctx.ip,
-        metadata: { codeQr, resultat: 'refuse_hors_compagnie' },
+        metadata: { codeQr, resultat: 'refuse_hors_compagnie', ...ctx.metaExtra },
       });
       throw new ForbiddenException(
         "Ce ticket n'appartient pas à un départ de votre compagnie",
@@ -181,7 +238,7 @@ export class TicketsService {
         acteurId: ctx?.userId,
         acteurRole: ctx?.role,
         ip: ctx?.ip,
-        metadata: { codeQr, resultat },
+        metadata: { codeQr, resultat, ...ctx?.metaExtra },
       });
 
     if (!ticket) {
@@ -308,6 +365,106 @@ export class TicketsService {
           : null,
       };
     });
+  }
+
+  // Manifeste d'un départ, téléchargé par le contrôleur tant qu'il a du réseau :
+  // clé publique + liste des tickets (avec statut, pour repérer les révocations
+  // annule/utilise). Ensuite le contrôle se fait 100 % hors-ligne.
+  async manifesteDepart(departId: number, user: AuthenticatedUser) {
+    const depart = await this.prisma.depart.findUnique({
+      where: { id: departId },
+      include: {
+        trajet: {
+          include: {
+            villeDepart: { select: { nom: true } },
+            villeArrivee: { select: { nom: true } },
+            compagnie: { select: { id: true, nom: true } },
+          },
+        },
+      },
+    });
+    if (!depart) throw new NotFoundException(`Départ ${departId} introuvable`);
+
+    if (
+      user.role !== UserRole.ADMIN &&
+      user.compagnieId != null &&
+      depart.trajet.compagnie.id !== user.compagnieId
+    ) {
+      throw new ForbiddenException(
+        "Ce départ n'appartient pas à votre compagnie",
+      );
+    }
+
+    const tickets = await this.prisma.ticket.findMany({
+      where: { reservation: { departId } },
+      include: {
+        reservation: {
+          select: {
+            id: true,
+            nombrePlaces: true,
+            passagerNom: true,
+            utilisateur: { select: { nom: true } },
+          },
+        },
+      },
+      orderBy: { id: 'asc' },
+    });
+
+    return {
+      depart: {
+        id: depart.id,
+        dateDepart: depart.dateDepart,
+        statut: depart.statut,
+        heureDepart: depart.trajet.heureDepart,
+        villeDepart: depart.trajet.villeDepart.nom,
+        villeArrivee: depart.trajet.villeArrivee.nom,
+        compagnie: depart.trajet.compagnie,
+      },
+      genereA: new Date().toISOString(),
+      algo: 'ed25519',
+      clePublique: clePubliquePem(),
+      tickets: tickets.map((t) => ({
+        ticketId: t.id,
+        codeQr: t.codeQr,
+        siege: t.siege,
+        statut: t.statut,
+        reservationId: t.reservation.id,
+        passager:
+          t.reservation.utilisateur?.nom ?? t.reservation.passagerNom ?? null,
+      })),
+    };
+  }
+
+  // Rejoue les scans faits hors-ligne par le contrôleur. Chaque scan repasse
+  // par `valider()` : le premier succès marque le ticket `utilise`, un doublon
+  // renvoie `deja_utilise` (signal de conflit entre deux contrôleurs).
+  async synchroniserValidations(
+    scans: { codeQr: string; scanneA?: string; resultatLocal?: string }[],
+    ctx: ActeurContexte,
+  ) {
+    const resultats: {
+      codeQr: string;
+      valide: boolean;
+      message: string;
+    }[] = [];
+    for (const scan of scans) {
+      const verdict = await this.valider(scan.codeQr, {
+        ...ctx,
+        metaExtra: {
+          source: 'sync_hors_ligne',
+          scanneA: scan.scanneA ?? null,
+          resultatLocal: scan.resultatLocal ?? null,
+        },
+      }).catch((err) => ({
+        valide: false,
+        message:
+          err instanceof ForbiddenException
+            ? 'Ticket hors de votre compagnie'
+            : 'Erreur de synchronisation',
+      }));
+      resultats.push({ codeQr: scan.codeQr, ...verdict });
+    }
+    return { traites: resultats.length, resultats };
   }
 
   private assertAcces(

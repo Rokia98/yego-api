@@ -38,6 +38,9 @@ services:
       # Simulation de paiement (POST /paiements/reservation/:id/simuler).
       # Laisser 'false' hors dev / tests d'intégration.
       PAYMENT_SIMULATION: ${PAYMENT_SIMULATION:-false}
+      # Clé Ed25519 (PEM) qui signe les QR pour la validation hors-ligne.
+      # Vide = clé éphémère par démarrage (dev).
+      TICKET_SIGNING_PRIVATE_KEY: ${TICKET_SIGNING_PRIVATE_KEY:-}
       CORS_ORIGIN: ${CORS_ORIGIN:-*}
       SWAGGER_ENABLED: ${SWAGGER_ENABLED:-false}
       SEED_ON_START: ${SEED_ON_START:-false}

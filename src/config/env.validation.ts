@@ -77,6 +77,13 @@ export class EnvironmentVariables {
   @IsIn(['true', 'false'])
   PAYMENT_SIMULATION?: string;
 
+  // Clé privée Ed25519 (PEM PKCS#8) qui signe les QR des tickets pour la
+  // validation hors-ligne. Optionnelle : sans elle, une paire éphémère est
+  // générée au démarrage (dev). À définir en production.
+  @IsOptional()
+  @IsString()
+  TICKET_SIGNING_PRIVATE_KEY?: string;
+
   // Liste d'origines séparées par des virgules. Vide/absent = aucune origine
   // navigateur autorisée (les clients non-navigateur ne sont pas concernés).
   @IsOptional()
