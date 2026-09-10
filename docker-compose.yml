@@ -35,6 +35,9 @@ services:
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-15m}
       REFRESH_TOKEN_EXPIRES_DAYS: ${REFRESH_TOKEN_EXPIRES_DAYS:-30}
       PAYMENT_WEBHOOK_SECRET: ${PAYMENT_WEBHOOK_SECRET:?PAYMENT_WEBHOOK_SECRET requis}
+      # Simulation de paiement (POST /paiements/reservation/:id/simuler).
+      # Laisser 'false' hors dev / tests d'intégration.
+      PAYMENT_SIMULATION: ${PAYMENT_SIMULATION:-false}
       CORS_ORIGIN: ${CORS_ORIGIN:-*}
       SWAGGER_ENABLED: ${SWAGGER_ENABLED:-false}
       SEED_ON_START: ${SEED_ON_START:-false}

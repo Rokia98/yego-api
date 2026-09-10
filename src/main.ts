@@ -63,6 +63,14 @@ async function bootstrap() {
     SwaggerModule.setup('api/v1/docs', app, document);
   }
 
+  if (config.get('PAYMENT_SIMULATION') === 'true') {
+    logger.warn(
+      '⚠️  PAYMENT_SIMULATION=true : les paiements peuvent être confirmés sans ' +
+        'transaction réelle (POST /paiements/reservation/:id/simuler). ' +
+        'À désactiver sur une vraie production.',
+    );
+  }
+
   const port = config.get<number>('PORT', 3000);
   await app.listen(port);
   logger.log(`Yègo API démarrée sur le port ${port} (préfixe /api/v1)`);

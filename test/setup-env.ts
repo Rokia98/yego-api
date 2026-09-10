@@ -7,6 +7,7 @@ process.env.JWT_SECRET =
 process.env.JWT_EXPIRES_IN = '15m';
 process.env.PAYMENT_WEBHOOK_SECRET =
   process.env.PAYMENT_WEBHOOK_SECRET ?? 'e2e-webhook-secret-16+';
+process.env.PAYMENT_SIMULATION = 'true';
 process.env.RESERVATION_PAIEMENT_TTL_MINUTES = '30';
 // La base de test : schéma dédié dans la base de dev, ou DATABASE_URL_TEST en CI.
 process.env.DATABASE_URL =

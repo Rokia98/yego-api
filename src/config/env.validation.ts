@@ -1,6 +1,7 @@
 import { plainToInstance, Transform } from 'class-transformer';
 import {
   IsEnum,
+  IsIn,
   IsInt,
   IsOptional,
   IsString,
@@ -68,6 +69,13 @@ export class EnvironmentVariables {
       'PAYMENT_WEBHOOK_SECRET doit faire au moins 16 caractères et être distinct de JWT_SECRET.',
   })
   PAYMENT_WEBHOOK_SECRET: string;
+
+  // Mode simulation de paiement : expose POST /paiements/reservation/:id/simuler
+  // qui marque un paiement « payé » sans transaction réelle. Pour le dev et les
+  // tests d'intégration de l'app. NE JAMAIS activer sur une vraie production.
+  @IsOptional()
+  @IsIn(['true', 'false'])
+  PAYMENT_SIMULATION?: string;
 
   // Liste d'origines séparées par des virgules. Vide/absent = aucune origine
   // navigateur autorisée (les clients non-navigateur ne sont pas concernés).

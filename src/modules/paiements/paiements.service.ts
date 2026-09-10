@@ -37,10 +37,15 @@ export class PaiementsService {
   // Sécurité : le montant n'est jamais pris depuis le body du client, il
   // est recalculé à partir du prix du trajet de la réservation, sinon un
   // client pourrait payer 1 FCFA pour n'importe quel trajet.
+  // Initie (ou relance) le paiement en ligne d'une réservation. Idempotent :
+  // s'il existe déjà un paiement 'en_attente' ou 'echoue' pour la réservation,
+  // on le réutilise (mise à jour du moyen + retour en 'en_attente') plutôt que
+  // d'échouer sur la contrainte d'unicité — un paiement échoué n'est donc pas
+  // un cul-de-sac.
   async create(dto: CreatePaiementDto, requestingUserId: number) {
     const reservation = await this.prisma.reservation.findUnique({
       where: { id: dto.reservationId },
-      include: { depart: { include: { trajet: true } } },
+      include: { depart: { include: { trajet: true } }, paiement: true },
     });
 
     if (!reservation) {
@@ -49,8 +54,32 @@ export class PaiementsService {
     if (reservation.utilisateurId !== requestingUserId) {
       throw new ForbiddenException("Vous ne pouvez payer que vos propres réservations");
     }
+    if (reservation.statut !== 'confirmee') {
+      throw new BadRequestException('Cette réservation est annulée ou expirée');
+    }
 
     const montant = reservation.depart.trajet.prix.times(reservation.nombrePlaces);
+
+    const existant = reservation.paiement;
+    if (existant) {
+      if (existant.statut === 'paye') {
+        throw new BadRequestException('Cette réservation est déjà payée');
+      }
+      if (existant.statut === 'rembourse') {
+        throw new BadRequestException('Cette réservation a été remboursée');
+      }
+      // 'en_attente' ou 'echoue' → on relance le même paiement.
+      return this.prisma.paiement.update({
+        where: { reservationId: dto.reservationId },
+        data: {
+          montant,
+          moyenPaiement: dto.moyenPaiement,
+          referenceTransaction: dto.referenceTransaction ?? null,
+          statut: 'en_attente',
+        },
+        include: { reservation: true },
+      });
+    }
 
     return this.prisma.paiement.create({
       data: {
@@ -166,6 +195,75 @@ export class PaiementsService {
     });
 
     return paiement;
+  }
+
+  // Simulation d'une réponse opérateur mobile money (flag PAYMENT_SIMULATION).
+  // Réservé au voyageur propriétaire de la réservation (ou admin). 'succes'
+  // rejoint exactement le chemin du webhook (confirmer) ; 'echec' passe le
+  // paiement en 'echoue' — la réservation reste réservée et peut être repayée
+  // en relançant la simulation avec 'succes'.
+  async simuler(
+    reservationId: number,
+    resultat: 'succes' | 'echec',
+    user: AuthenticatedUser,
+  ) {
+    const paiement = await this.prisma.paiement.findUnique({
+      where: { reservationId },
+      include: { reservation: true },
+    });
+    if (!paiement) {
+      throw new NotFoundException(
+        "Aucun paiement à simuler : créez d'abord le paiement (POST /paiements)",
+      );
+    }
+    if (
+      user.role !== UserRole.ADMIN &&
+      paiement.reservation.utilisateurId !== user.userId
+    ) {
+      throw new ForbiddenException(
+        'Vous ne pouvez simuler que le paiement de vos propres réservations',
+      );
+    }
+    if (paiement.statut === 'paye') {
+      throw new BadRequestException('Ce paiement est déjà confirmé');
+    }
+    if (paiement.statut === 'rembourse') {
+      throw new BadRequestException('Ce paiement a été remboursé');
+    }
+
+    if (resultat === 'succes') {
+      const confirme = await this.confirmer(reservationId);
+      await this.audit.record({
+        action: 'paiement.simulation',
+        entite: 'paiement',
+        entiteId: confirme.id,
+        acteurId: user.userId,
+        acteurRole: user.role,
+        metadata: { reservationId, resultat: 'succes' },
+      });
+      return confirme;
+    }
+
+    const echoue = await this.prisma.paiement.update({
+      where: { reservationId },
+      data: { statut: 'echoue' },
+      include: { reservation: true },
+    });
+    await this.audit.record({
+      action: 'paiement.simulation',
+      entite: 'paiement',
+      entiteId: echoue.id,
+      acteurId: user.userId,
+      acteurRole: user.role,
+      metadata: { reservationId, resultat: 'echec' },
+    });
+    await this.notifications.notifier(echoue.reservation.utilisateurId, {
+      type: 'paiement.echoue',
+      titre: 'Paiement échoué',
+      corps: "Votre paiement n'a pas abouti. Vous pouvez réessayer.",
+      donnees: { reservationId, paiementId: echoue.id },
+    });
+    return echoue;
   }
 
   async update(id: number, dto: UpdatePaiementDto, requestingUserId: number) {

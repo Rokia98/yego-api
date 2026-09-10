@@ -44,4 +44,16 @@ describe('validate (env)', () => {
       }),
     ).not.toThrow();
   });
+
+  it('rejette PAYMENT_SIMULATION avec une valeur autre que true/false', () => {
+    expect(() => validate({ ...base, PAYMENT_SIMULATION: 'oui' })).toThrow(
+      /PAYMENT_SIMULATION/,
+    );
+  });
+
+  it('accepte PAYMENT_SIMULATION=true', () => {
+    expect(() =>
+      validate({ ...base, PAYMENT_SIMULATION: 'true' }),
+    ).not.toThrow();
+  });
 });

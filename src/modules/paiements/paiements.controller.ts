@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { WebhookSecretGuard } from '../../common/guards/webhook-secret.guard';
+import { PaymentSimulationGuard } from '../../common/guards/payment-simulation.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { PERMISSIONS } from '../../config/permissions';
@@ -20,6 +21,7 @@ import { AuthenticatedUser } from '../auth/strategies/jwt.strategy';
 import { PaiementsService } from './paiements.service';
 import { CreatePaiementDto } from './dto/create-paiement.dto';
 import { CreatePaiementGuichetDto } from './dto/create-paiement-guichet.dto';
+import { SimulerPaiementDto } from './dto/simuler-paiement.dto';
 import { UpdatePaiementDto } from './dto/update-paiement.dto';
 
 // Pas de guard au niveau du contrôleur : le webhook 'confirmer' ci-dessous
@@ -83,6 +85,19 @@ export class PaiementsController {
   @Patch('reservation/:reservationId/confirmer')
   confirmer(@Param('reservationId', ParseIntPipe) reservationId: number) {
     return this.paiementsService.confirmer(reservationId);
+  }
+
+  // Simulation opérateur (mode PAYMENT_SIMULATION uniquement) : le voyageur
+  // force le résultat de SON paiement sans transaction réelle. 404 si le flag
+  // n'est pas actif.
+  @UseGuards(JwtAuthGuard, PaymentSimulationGuard)
+  @Post('reservation/:reservationId/simuler')
+  simuler(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('reservationId', ParseIntPipe) reservationId: number,
+    @Body() dto: SimulerPaiementDto,
+  ) {
+    return this.paiementsService.simuler(reservationId, dto.resultat, user);
   }
 
   @UseGuards(JwtAuthGuard)

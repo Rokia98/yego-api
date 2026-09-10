@@ -7,6 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
+import { Prisma } from '@prisma/client';
 
 /**
  * Filtre global : normalise toutes les erreurs vers un format JSON unique.
@@ -28,7 +29,18 @@ export class AllExceptionsFilter implements ExceptionFilter {
     let message: string | string[] = 'Erreur interne du serveur';
     let details: unknown = null;
 
-    if (exception instanceof HttpException) {
+    if (exception instanceof Prisma.PrismaClientKnownRequestError) {
+      // Contraintes DB courantes → statut HTTP propre plutôt qu'un 500.
+      if (exception.code === 'P2002') {
+        status = HttpStatus.CONFLICT;
+        message = 'Cette ressource existe déjà';
+      } else if (exception.code === 'P2025') {
+        status = HttpStatus.NOT_FOUND;
+        message = 'Ressource introuvable';
+      } else {
+        this.logger.error(`Erreur Prisma ${exception.code} : ${exception.message}`);
+      }
+    } else if (exception instanceof HttpException) {
       status = exception.getStatus();
       const exceptionResponse = exception.getResponse();
 
