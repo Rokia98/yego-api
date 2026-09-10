@@ -1,5 +1,74 @@
 # Changelog - Yègo API
 
+## [0.17.0] - 2026-09-04
+
+### 📊 Module dashboard
+- Nouveau module **`dashboard`** (perm `dashboard:read` — company_admin + admin) :
+  - `GET /dashboard/resume` : réservations (par statut / canal / agent guichet),
+    chiffre d'affaires par statut de paiement, occupation des départs
+    (places totales / occupées / taux de remplissage).
+  - `GET /dashboard/trajets` et `GET /dashboard/compagnies` (ce dernier **admin
+    uniquement**, 403 sinon) : classements par chiffre d'affaires **encaissé**.
+  - Période `?from&to` (YYYY-MM-DD) : défaut 30 j, bornée à 366 j. Un
+    company_admin est toujours restreint à sa propre compagnie.
+- Tests : 68 unitaires + 52 e2e.
+
+## [0.16.0] - 2026-09-04
+
+### 🎫 Historique des validations
+- `GET /tickets/validations?skip&take` (perm `ticket:validate`) : journal des
+  scans à l'embarquement (succès **et** échecs), issu de l'audit
+  `ticket.validation`. Portée : agent → ses scans, company_admin → sa compagnie,
+  admin → tout. Enrichi du trajet quand le ticket existe encore.
+- Contexte produit : l'app mobile remplace l'onglet « Guichet » par
+  « Billets scannés » (les endpoints guichet restent en place côté API).
+
+## [0.15.1] - 2026-09-04
+
+### 🔧 Reprise de paiement en ligne
+- `PaiementsService.create` rendu **idempotent** : un paiement `en_attente` ou
+  `echoue` existant est relancé au lieu d'échouer sur la contrainte d'unicité
+  (fin du `500` P2002 au 2e POST et du cul-de-sac après un échec). Contrôle
+  ajouté : la réservation doit être `confirmee`.
+- `AllExceptionsFilter` : `Prisma` `P2002` → `409`, `P2025` → `404`.
+
+## [0.15.0] - 2026-09-04
+
+### 💳 Simulation de paiement
+- `POST /paiements/reservation/:reservationId/simuler` `{ resultat: 'succes' |
+  'echec' }` : imite la réponse d'un opérateur mobile money **sans transaction
+  réelle**. Réservé au voyageur propriétaire (ou admin).
+  - `succes` → chemin normal `confirmer()` (statut `paye` + notification).
+  - `echec` → statut `echoue` ; la réservation reste réservée, repayable.
+- `PaymentSimulationGuard` : `404` si `PAYMENT_SIMULATION !== 'true'`
+  (fonctionne même en conteneur `NODE_ENV=production`). Avertissement au boot.
+- `PAYMENT_SIMULATION` validé `@IsIn(['true','false'])` ; défaut `false`
+  (`.env.example`, `docker-compose.yml`), `true` en dev et tests.
+
+## [0.14.0] - 2026-09-04
+
+### 💺 Choix de place avant paiement
+- `Reservation.sieges String[]` (migration `20260904150000_reservation_sieges`)
+  — le voyageur choisit ses sièges **à la création de la réservation, avant tout
+  paiement**.
+- `GET /departs/:id/sieges` (public) : `{ placesTotales, placesDisponibles,
+  occupes: string[] }`. Occupés = tickets non annulés + sièges des réservations
+  `confirmee` (annulée / expirée ⇒ sièges libérés).
+- `POST /reservations` et `POST /reservations/guichet` acceptent `sieges?` :
+  si fourni, `length === nombrePlaces` (sinon `400`) et tous libres (sinon `409`).
+- `POST /tickets/reservation/:id` : `siege` devient facultatif ; sans lui, le
+  prochain `reservation.sieges` sans ticket est attribué.
+- Helper partagé `common/sieges.ts` (`SIEGE_REGEX` + `siegesOccupesDepart`).
+
+## [0.13.0] - 2026-09-04
+
+### 🔎 Recherche de départs plus tolérante
+- Villes appariées via `unaccent(lower())` (migration `20260904120000_unaccent`)
+  — « bouake » / « BOUAKÉ » trouve « Bouaké » ; ville inconnue → `[]`.
+- `date` devient **optionnelle** ; la recherche se fait **toujours par
+  fourchette** : `date` absente → aujourd'hui ; `dateFin` absente → `+30 j` ;
+  bornée à `90 j`. Jour unique = passer `date` et `dateFin` égales.
+
 ## [Non versionné] - seed enrichi
 
 - **`prisma/seed.ts` refondu, orienté données** : 5 compagnies interurbaines

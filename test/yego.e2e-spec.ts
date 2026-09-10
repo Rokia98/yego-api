@@ -355,5 +355,315 @@ describe('Yègo API (e2e)', () => {
         )
         .expect(200)
         .then((r) => expect(Array.isArray(r.body)).toBe(true)));
+
+    it('sans date, balaie une fenêtre à partir d’aujourd’hui', () =>
+      http()
+        .get('/api/v1/departs/recherche?depart=Abidjan&arrivee=Bouaké')
+        .expect(200)
+        .then((r) => {
+          expect(Array.isArray(r.body)).toBe(true);
+          // Le départ fixture Abidjan→Bouaké est dans 3 jours.
+          expect(r.body.length).toBeGreaterThanOrEqual(1);
+        }));
+
+    it('trouve les villes sans tenir compte des accents ni de la casse', () =>
+      http()
+        .get('/api/v1/departs/recherche?depart=abidjan&arrivee=bouake')
+        .expect(200)
+        .then((r) => {
+          expect(Array.isArray(r.body)).toBe(true);
+          expect(r.body.length).toBeGreaterThanOrEqual(1);
+        }));
+
+    it('renvoie un tableau vide pour une ville inconnue', () =>
+      http()
+        .get('/api/v1/departs/recherche?depart=Abidjan&arrivee=Tombouctou')
+        .expect(200)
+        .then((r) => expect(r.body).toEqual([])));
+  });
+
+  // ---------------------------------------------------------------------------
+  describe('Choix de place (avant paiement)', () => {
+    it('GET /departs/:id/sieges expose le plan', () =>
+      http()
+        .get(`/api/v1/departs/${fx.departFuturId}/sieges`)
+        .expect(200)
+        .then((r) => {
+          expect(typeof r.body.placesTotales).toBe('number');
+          expect(Array.isArray(r.body.occupes)).toBe(true);
+        }));
+
+    it('le voyageur réserve des sièges précis', () =>
+      http()
+        .post('/api/v1/reservations')
+        .set(auth('voyageur'))
+        .send({ departId: fx.departFuturId, nombrePlaces: 2, sieges: ['C1', 'C2'] })
+        .expect(201)
+        .then((r) => expect(r.body.sieges).toEqual(['C1', 'C2'])));
+
+    it('les sièges pris apparaissent dans le plan dès la réservation (avant paiement)', () =>
+      http()
+        .get(`/api/v1/departs/${fx.departFuturId}/sieges`)
+        .expect(200)
+        .then((r) => {
+          expect(r.body.occupes).toEqual(expect.arrayContaining(['C1', 'C2']));
+        }));
+
+    it('refuse un siège déjà pris → 409', () =>
+      http()
+        .post('/api/v1/reservations')
+        .set(auth('voyageur'))
+        .send({ departId: fx.departFuturId, nombrePlaces: 1, sieges: ['C1'] })
+        .expect(409));
+
+    it('refuse un nombre de sièges ≠ nombrePlaces → 400', () =>
+      http()
+        .post('/api/v1/reservations')
+        .set(auth('voyageur'))
+        .send({ departId: fx.departFuturId, nombrePlaces: 2, sieges: ['C7'] })
+        .expect(400));
+  });
+
+  // ---------------------------------------------------------------------------
+  describe('Simulation de paiement (PAYMENT_SIMULATION)', () => {
+    let reservationId: number;
+
+    it('le voyageur réserve puis initie un paiement (en_attente)', async () => {
+      const resa = await http()
+        .post('/api/v1/reservations')
+        .set(auth('voyageur'))
+        .send({ departId: fx.departFuturId, nombrePlaces: 1, sieges: ['E1'] })
+        .expect(201);
+      reservationId = resa.body.id;
+
+      const pay = await http()
+        .post('/api/v1/paiements')
+        .set(auth('voyageur'))
+        .send({ reservationId, moyenPaiement: 'orange_money' })
+        .expect(201);
+      expect(pay.body.statut).toBe('en_attente');
+    });
+
+    it('un autre utilisateur ne peut pas simuler ce paiement → 403', () =>
+      http()
+        .post(`/api/v1/paiements/reservation/${reservationId}/simuler`)
+        .set(auth('gestionnaire'))
+        .send({ resultat: 'succes' })
+        .expect(403));
+
+    it('simuler un échec → paiement "echoue"', () =>
+      http()
+        .post(`/api/v1/paiements/reservation/${reservationId}/simuler`)
+        .set(auth('voyageur'))
+        .send({ resultat: 'echec' })
+        .expect(201)
+        .then((r) => expect(r.body.statut).toBe('echoue')));
+
+    it('simuler un succès → paiement "paye", ticket générable', async () => {
+      const r = await http()
+        .post(`/api/v1/paiements/reservation/${reservationId}/simuler`)
+        .set(auth('voyageur'))
+        .send({ resultat: 'succes' })
+        .expect(201);
+      expect(r.body.statut).toBe('paye');
+
+      const ticket = await http()
+        .post(`/api/v1/tickets/reservation/${reservationId}`)
+        .set(auth('voyageur'))
+        .send({})
+        .expect(201);
+      expect(ticket.body.siege).toBe('E1');
+    });
+
+    it('re-simuler un paiement déjà confirmé → 400', () =>
+      http()
+        .post(`/api/v1/paiements/reservation/${reservationId}/simuler`)
+        .set(auth('voyageur'))
+        .send({ resultat: 'succes' })
+        .expect(400));
+  });
+
+  // ---------------------------------------------------------------------------
+  describe('Reprise de paiement en ligne', () => {
+    let reservationId: number;
+    let paiementId: number;
+
+    it('initie le paiement', async () => {
+      const resa = await http()
+        .post('/api/v1/reservations')
+        .set(auth('voyageur'))
+        .send({ departId: fx.departFuturId, nombrePlaces: 1, sieges: ['F1'] })
+        .expect(201);
+      reservationId = resa.body.id;
+
+      const pay = await http()
+        .post('/api/v1/paiements')
+        .set(auth('voyageur'))
+        .send({ reservationId, moyenPaiement: 'orange_money' })
+        .expect(201);
+      paiementId = pay.body.id;
+    });
+
+    it('un 2e POST /paiements réutilise le même paiement (pas de 500)', () =>
+      http()
+        .post('/api/v1/paiements')
+        .set(auth('voyageur'))
+        .send({ reservationId, moyenPaiement: 'wave' })
+        .expect(201)
+        .then((r) => {
+          expect(r.body.id).toBe(paiementId);
+          expect(r.body.moyenPaiement).toBe('wave');
+          expect(r.body.statut).toBe('en_attente');
+        }));
+
+    it('après un échec, on peut relancer le paiement', async () => {
+      await http()
+        .post(`/api/v1/paiements/reservation/${reservationId}/simuler`)
+        .set(auth('voyageur'))
+        .send({ resultat: 'echec' })
+        .expect(201)
+        .then((r) => expect(r.body.statut).toBe('echoue'));
+
+      await http()
+        .post('/api/v1/paiements')
+        .set(auth('voyageur'))
+        .send({ reservationId, moyenPaiement: 'orange_money' })
+        .expect(201)
+        .then((r) => expect(r.body.statut).toBe('en_attente'));
+
+      await http()
+        .post(`/api/v1/paiements/reservation/${reservationId}/simuler`)
+        .set(auth('voyageur'))
+        .send({ resultat: 'succes' })
+        .expect(201)
+        .then((r) => expect(r.body.statut).toBe('paye'));
+    });
+
+    it('payer une réservation déjà payée → 400', () =>
+      http()
+        .post('/api/v1/paiements')
+        .set(auth('voyageur'))
+        .send({ reservationId, moyenPaiement: 'wave' })
+        .expect(400));
+
+    it('payer une réservation annulée → 400', async () => {
+      const resa = await http()
+        .post('/api/v1/reservations')
+        .set(auth('voyageur'))
+        .send({ departId: fx.departFuturId, nombrePlaces: 1 })
+        .expect(201);
+      await http()
+        .patch(`/api/v1/reservations/${resa.body.id}/annuler`)
+        .set(auth('voyageur'))
+        .expect(200);
+      await http()
+        .post('/api/v1/paiements')
+        .set(auth('voyageur'))
+        .send({ reservationId: resa.body.id, moyenPaiement: 'wave' })
+        .expect(400);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  describe('Historique des validations (agent)', () => {
+    let codeQr: string;
+
+    it('prépare un billet payé et le valide', async () => {
+      const resa = await http()
+        .post('/api/v1/reservations')
+        .set(auth('voyageur'))
+        .send({ departId: fx.departFuturId, nombrePlaces: 1, sieges: ['G1'] })
+        .expect(201);
+      await http()
+        .post('/api/v1/paiements')
+        .set(auth('voyageur'))
+        .send({ reservationId: resa.body.id, moyenPaiement: 'wave' })
+        .expect(201);
+      await http()
+        .post(`/api/v1/paiements/reservation/${resa.body.id}/simuler`)
+        .set(auth('voyageur'))
+        .send({ resultat: 'succes' })
+        .expect(201);
+      const ticket = await http()
+        .post(`/api/v1/tickets/reservation/${resa.body.id}`)
+        .set(auth('voyageur'))
+        .send({})
+        .expect(201);
+      codeQr = ticket.body.codeQr;
+
+      await http()
+        .post(`/api/v1/tickets/valider/${codeQr}`)
+        .set(auth('agent'))
+        .expect(201);
+    });
+
+    it("l'agent voit son scan avec le trajet complet", async () => {
+      const r = await http()
+        .get('/api/v1/tickets/validations')
+        .set(auth('agent'))
+        .expect(200);
+      const entry = r.body.find(
+        (v: { codeQr: string }) => v.codeQr === codeQr,
+      );
+      expect(entry).toBeTruthy();
+      expect(entry.resultat).toBe('valide');
+      expect(entry.siege).toBe('G1');
+      expect(entry.reservation.depart.trajet.villeDepart.nom).toBe('Korhogo');
+      expect(entry.reservation.depart.trajet.compagnie.nom).toEqual(
+        expect.any(String),
+      );
+    });
+
+    it('un voyageur n\'a pas accès à l\'historique → 403', () =>
+      http()
+        .get('/api/v1/tickets/validations')
+        .set(auth('voyageur'))
+        .expect(403));
+  });
+
+  // ---------------------------------------------------------------------------
+  describe('Dashboard', () => {
+    it('un agent n\'a pas accès (403)', () =>
+      http().get('/api/v1/dashboard/resume').set(auth('agent')).expect(403));
+
+    it('un voyageur n\'a pas accès (403)', () =>
+      http().get('/api/v1/dashboard/resume').set(auth('voyageur')).expect(403));
+
+    it('le gestionnaire voit le résumé de sa seule compagnie', async () => {
+      const r = await http()
+        .get('/api/v1/dashboard/resume')
+        .set(auth('gestionnaire'))
+        .expect(200);
+      expect(r.body.reservations.total).toBeGreaterThan(0);
+      expect(typeof r.body.occupation.tauxRemplissage).toBe('number');
+      expect(r.body.chiffreAffaires.parStatutPaiement).toBeDefined();
+    });
+
+    it("l'admin voit le résumé toutes compagnies confondues", () =>
+      http()
+        .get('/api/v1/dashboard/resume')
+        .set(auth('admin'))
+        .expect(200)
+        .then((r) => expect(r.body.reservations.total).toBeGreaterThan(0)));
+
+    it('classement des trajets les plus vendus (gestionnaire)', () =>
+      http()
+        .get('/api/v1/dashboard/trajets?limit=5')
+        .set(auth('gestionnaire'))
+        .expect(200)
+        .then((r) => expect(Array.isArray(r.body)).toBe(true)));
+
+    it('classement des compagnies réservé à l\'admin (403 pour gestionnaire)', () =>
+      http()
+        .get('/api/v1/dashboard/compagnies')
+        .set(auth('gestionnaire'))
+        .expect(403));
+
+    it("classement des compagnies (admin)", () =>
+      http()
+        .get('/api/v1/dashboard/compagnies')
+        .set(auth('admin'))
+        .expect(200)
+        .then((r) => expect(Array.isArray(r.body)).toBe(true)));
   });
 });
