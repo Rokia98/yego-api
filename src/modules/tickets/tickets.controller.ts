@@ -43,6 +43,23 @@ export class TicketsController {
     return this.ticketsService.findByReservation(reservationId, user);
   }
 
+  // Historique des validations à l'embarquement. Agent → ses propres scans ;
+  // company_admin → ceux de sa compagnie ; admin → tous. Déclarée AVANT ':id'.
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.TICKET_VALIDATE)
+  @Get('validations')
+  historiqueValidations(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('skip') skip = 0,
+    @Query('take') take = 10,
+  ) {
+    return this.ticketsService.historiqueValidations(
+      user,
+      Number(skip),
+      Number(take),
+    );
+  }
+
   @UseGuards(JwtAuthGuard)
   @Get(':id')
   findOne(

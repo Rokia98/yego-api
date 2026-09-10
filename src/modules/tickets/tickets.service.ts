@@ -222,6 +222,94 @@ export class TicketsService {
     return this.prisma.ticket.count();
   }
 
+  // Historique des validations à l'embarquement, à partir du journal d'audit
+  // (action 'ticket.validation' — succès ET échecs). Enrichi avec le trajet
+  // quand le ticket existe encore.
+  async historiqueValidations(
+    user: AuthenticatedUser,
+    skip = 0,
+    take = 10,
+  ) {
+    const where: Prisma.AuditLogWhereInput = { action: 'ticket.validation' };
+    if (user.role === UserRole.ADMIN) {
+      // toutes les compagnies
+    } else if (
+      user.role === UserRole.COMPANY_ADMIN &&
+      user.compagnieId != null
+    ) {
+      where.acteur = { compagnieId: user.compagnieId };
+    } else {
+      where.acteurId = user.userId;
+    }
+
+    const lignes = await this.prisma.auditLog.findMany({
+      where,
+      ...paginer(skip, take),
+      orderBy: { dateCreation: 'desc' },
+      select: { entiteId: true, metadata: true, dateCreation: true },
+    });
+
+    const ticketIds = [
+      ...new Set(
+        lignes
+          .map((l) => l.entiteId)
+          .filter((v): v is number => v != null),
+      ),
+    ];
+    const tickets = ticketIds.length
+      ? await this.prisma.ticket.findMany({
+          where: { id: { in: ticketIds } },
+          include: {
+            reservation: {
+              include: {
+                depart: {
+                  include: {
+                    trajet: {
+                      include: {
+                        villeDepart: { select: { nom: true } },
+                        villeArrivee: { select: { nom: true } },
+                        compagnie: { select: { nom: true } },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        })
+      : [];
+    const parId = new Map(tickets.map((t) => [t.id, t]));
+
+    return lignes.map((l) => {
+      const meta = (l.metadata as unknown as {
+        codeQr?: string;
+        resultat?: string;
+      } | null) ?? {};
+      const ticket = l.entiteId != null ? parId.get(l.entiteId) : undefined;
+      return {
+        ticketId: ticket?.id ?? null,
+        siege: ticket?.siege ?? null,
+        codeQr: meta.codeQr ?? ticket?.codeQr ?? null,
+        resultat: meta.resultat ?? null,
+        date: l.dateCreation,
+        reservation: ticket
+          ? {
+              nombrePlaces: ticket.reservation.nombrePlaces,
+              depart: {
+                dateDepart: ticket.reservation.depart.dateDepart,
+                trajet: {
+                  heureDepart: ticket.reservation.depart.trajet.heureDepart,
+                  villeDepart: ticket.reservation.depart.trajet.villeDepart,
+                  villeArrivee: ticket.reservation.depart.trajet.villeArrivee,
+                  compagnie: ticket.reservation.depart.trajet.compagnie,
+                },
+              },
+            }
+          : null,
+      };
+    });
+  }
+
   private assertAcces(
     reservation: {
       utilisateurId: number | null;

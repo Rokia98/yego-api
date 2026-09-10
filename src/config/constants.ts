@@ -68,3 +68,12 @@ export enum TicketStatut {
   UTILISE = 'utilise',
   ANNULE = 'annule',
 }
+
+// Dashboard : période par défaut (sans `from`/`to`) et bornes pour éviter
+// d'agréger un historique trop large en une seule requête.
+export const DASHBOARD = {
+  PERIODE_DEFAUT_JOURS: 30,
+  PERIODE_MAX_JOURS: 366,
+  CLASSEMENT_LIMITE_DEFAUT: 10,
+  CLASSEMENT_LIMITE_MAX: 50,
+} as const;

@@ -33,6 +33,8 @@ export const PERMISSIONS = {
   // Abonnement plateforme
   ABONNEMENT_MANAGE: 'abonnement:manage', // créer / renouveler (admin)
   ABONNEMENT_READ: 'abonnement:read', // consulter celui de sa compagnie
+  // Pilotage
+  DASHBOARD_READ: 'dashboard:read', // statistiques (admin : toutes compagnies ; company_admin : la sienne)
   // Administration
   UTILISATEUR_LIST: 'utilisateur:list',
   UTILISATEUR_CREATE: 'utilisateur:create',
@@ -69,6 +71,7 @@ export const MATRICE_PERMISSIONS: Record<UserRole, Permission[] | typeof TOUTES>
     PERMISSIONS.AGENT_MANAGE,
     PERMISSIONS.ABONNEMENT_READ,
     PERMISSIONS.UTILISATEUR_CREATE,
+    PERMISSIONS.DASHBOARD_READ,
   ],
 
   [UserRole.ADMIN]: TOUTES,

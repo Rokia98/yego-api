@@ -23,6 +23,7 @@ import { ReservationsModule } from './modules/reservations/reservations.module';
 import { RemboursementsModule } from './modules/remboursements/remboursements.module';
 import { TicketsModule } from './modules/tickets/tickets.module';
 import { PaiementsModule } from './modules/paiements/paiements.module';
+import { DashboardModule } from './modules/dashboard/dashboard.module';
 
 @Module({
   imports: [
@@ -52,6 +53,7 @@ import { PaiementsModule } from './modules/paiements/paiements.module';
     RemboursementsModule,
     TicketsModule,
     PaiementsModule,
+    DashboardModule,
   ],
   providers: [
     PrismaService,
