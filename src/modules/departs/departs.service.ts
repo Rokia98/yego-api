@@ -49,8 +49,12 @@ export class DepartsService {
     });
   }
 
-  findAll(skip = 0, take = 10) {
+  findAll(skip = 0, take = 10, compagnieId?: number) {
     return this.prisma.depart.findMany({
+      where:
+        compagnieId != null && !Number.isNaN(compagnieId)
+          ? { trajet: { compagnieId } }
+          : undefined,
       ...paginer(skip, take),
       include: INCLUDE_COMPLET,
       orderBy: { dateDepart: 'asc' },

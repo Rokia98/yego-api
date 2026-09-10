@@ -198,11 +198,7 @@ export class ReservationsService {
     return this.prisma.reservation.findMany({
       where: this.filtrePortee(user),
       ...paginer(skip, take),
-      include: {
-        depart: { include: { trajet: true } },
-        tickets: true,
-        paiement: true,
-      },
+      include: RESERVATION_INCLUDE,
       orderBy: { dateReservation: 'desc' },
     });
   }

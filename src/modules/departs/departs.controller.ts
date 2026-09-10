@@ -26,8 +26,16 @@ export class DepartsController {
   constructor(private departsService: DepartsService) {}
 
   @Get()
-  findAll(@Query('skip') skip = 0, @Query('take') take = 10) {
-    return this.departsService.findAll(skip, take);
+  findAll(
+    @Query('skip') skip = 0,
+    @Query('take') take = 10,
+    @Query('compagnieId') compagnieId?: string,
+  ) {
+    return this.departsService.findAll(
+      Number(skip),
+      Number(take),
+      compagnieId != null ? Number(compagnieId) : undefined,
+    );
   }
 
   // Route spécifique déclarée AVANT ':id' pour ne pas être interceptée par elle.
