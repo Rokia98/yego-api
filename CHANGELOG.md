@@ -1,5 +1,12 @@
 # Changelog - Yègo API
 
+## [0.21.1] - 2026-09-10
+
+### 💺 Plan de salle plus lisible
+- `GET /departs/:id/sieges` ajoute `placesVendues` (total vendu) et
+  `placesSansSiege` (places en placement libre, non situables sur le plan) — le
+  client peut griser les sièges connus et rendre compte du reste. Additif.
+
 ## [0.21.0] - 2026-09-10
 
 ### 📈 Série temporelle du dashboard
