@@ -11,7 +11,9 @@ import {
 } from '../../common/compagnie';
 import { paginer } from '../../common/pagination';
 import { siegesOccupesDepart } from '../../common/sieges';
+import { notifierVoyageursDeparts } from '../../common/notifier-voyageurs';
 import { RECHERCHE_DEPART } from '../../config/constants';
+import { NotificationsService } from '../notifications/notifications.service';
 import { AuthenticatedUser } from '../auth/strategies/jwt.strategy';
 import { CreateDepartDto } from './dto/create-depart.dto';
 import { UpdateDepartDto } from './dto/update-depart.dto';
@@ -24,7 +26,10 @@ const INCLUDE_COMPLET = {
 
 @Injectable()
 export class DepartsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private notifications: NotificationsService,
+  ) {}
 
   async create(dto: CreateDepartDto, user: AuthenticatedUser) {
     const trajet = await this.prisma.trajet.findUnique({
@@ -178,7 +183,7 @@ export class DepartsService {
       dto.vehiculeId,
       dto.chauffeurId,
     );
-    return this.prisma.depart.update({
+    const misAJour = await this.prisma.depart.update({
       where: { id },
       data: {
         ...(dto.vehiculeId && { vehiculeId: dto.vehiculeId }),
@@ -189,6 +194,19 @@ export class DepartsService {
       },
       include: INCLUDE_COMPLET,
     });
+
+    // Date de départ décalée → prévenir les voyageurs concernés.
+    const ancienneDate = depart.dateDepart.toISOString().slice(0, 10);
+    const nouvelleDate = misAJour.dateDepart.toISOString().slice(0, 10);
+    if (ancienneDate !== nouvelleDate) {
+      await notifierVoyageursDeparts(this.prisma, this.notifications, [id], {
+        type: 'depart.date_modifiee',
+        titre: 'Changement de date',
+        corps: `${misAJour.trajet.villeDepart.nom} → ${misAJour.trajet.villeArrivee.nom} : le départ est reporté du ${ancienneDate} au ${nouvelleDate}.`,
+        donnees: { departId: id, ancienneDate, nouvelleDate },
+      });
+    }
+    return misAJour;
   }
 
   async delete(id: number, user: AuthenticatedUser) {

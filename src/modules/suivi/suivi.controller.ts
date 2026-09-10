@@ -19,6 +19,7 @@ import { AuthenticatedUser } from '../auth/strategies/jwt.strategy';
 import { verifierSuiviToken } from '../../common/suivi-token';
 import { SuiviService } from './suivi.service';
 import { PositionDto } from './dto/position.dto';
+import { DeclarerRetardDto } from './dto/declarer-retard.dto';
 
 @Controller('departs')
 export class SuiviController {
@@ -43,6 +44,18 @@ export class SuiviController {
     @Body() dto: PositionDto,
   ) {
     return this.suivi.enregistrerPosition(id, this.departIdDuToken(authorization), dto);
+  }
+
+  // Back-office : déclare un retard (sans GPS). Notifie les voyageurs.
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.DEPART_MANAGE)
+  @Post(':id/retard')
+  declarerRetard(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: DeclarerRetardDto,
+  ) {
+    return this.suivi.declarerRetard(id, user, dto.minutesRetard, dto.motif);
   }
 
   // App chauffeur : fin du trajet. Auth = jeton de suivi.

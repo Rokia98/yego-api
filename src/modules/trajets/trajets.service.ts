@@ -3,6 +3,8 @@ import { PrismaService } from '../../prisma.service';
 import { assertCompagnieScope, resoudreCompagnieCible } from '../../common/scope';
 import { assertCompagnieOperationnelle } from '../../common/compagnie';
 import { paginer } from '../../common/pagination';
+import { notifierVoyageursDeparts } from '../../common/notifier-voyageurs';
+import { NotificationsService } from '../notifications/notifications.service';
 import { AuthenticatedUser } from '../auth/strategies/jwt.strategy';
 import { CreateTrajetDto } from './dto/create-trajet.dto';
 import { UpdateTrajetDto } from './dto/update-trajet.dto';
@@ -13,9 +15,15 @@ const INCLUDE_VILLES = {
   compagnie: true,
 };
 
+const hhmm = (t: Date | null | undefined): string | null =>
+  t ? t.toISOString().slice(11, 16) : null;
+
 @Injectable()
 export class TrajetsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private notifications: NotificationsService,
+  ) {}
 
   async create(dto: CreateTrajetDto, user: AuthenticatedUser) {
     // Un company_admin ne peut créer un trajet que pour SA compagnie ; l'admin
@@ -78,7 +86,7 @@ export class TrajetsService {
         ? resoudreCompagnieCible(user, dto.compagnieId)
         : trajet.compagnieId;
 
-    return this.prisma.trajet.update({
+    const miseAJour = await this.prisma.trajet.update({
       where: { id },
       data: {
         compagnieId,
@@ -96,6 +104,49 @@ export class TrajetsService {
       },
       include: INCLUDE_VILLES,
     });
+
+    await this.notifierChangementHoraire(trajet, miseAJour);
+    return miseAJour;
+  }
+
+  // Prévient les voyageurs si l'heure de départ (ou d'arrivée) d'un trajet a
+  // bougé : leurs départs à venir encore actifs sont impactés.
+  private async notifierChangementHoraire(
+    avant: { heureDepart: Date; heureArriveeEstimee: Date | null },
+    apres: {
+      id: number;
+      heureDepart: Date;
+      heureArriveeEstimee: Date | null;
+      villeDepart: { nom: string };
+      villeArrivee: { nom: string };
+    },
+  ) {
+    const depAvant = hhmm(avant.heureDepart);
+    const depApres = hhmm(apres.heureDepart);
+    if (depAvant === depApres) return;
+
+    const aujourdhui = new Date();
+    aujourdhui.setUTCHours(0, 0, 0, 0);
+    const departs = await this.prisma.depart.findMany({
+      where: {
+        trajetId: apres.id,
+        dateDepart: { gte: aujourdhui },
+        statut: { in: ['planifie', 'en_route'] },
+      },
+      select: { id: true },
+    });
+
+    await notifierVoyageursDeparts(
+      this.prisma,
+      this.notifications,
+      departs.map((d) => d.id),
+      {
+        type: 'depart.horaire_modifie',
+        titre: "Changement d'horaire",
+        corps: `${apres.villeDepart.nom} → ${apres.villeArrivee.nom} : le départ passe de ${depAvant} à ${depApres}.`,
+        donnees: { trajetId: apres.id, ancienneHeure: depAvant ?? '', nouvelleHeure: depApres ?? '' },
+      },
+    );
   }
 
   async delete(id: number, user: AuthenticatedUser) {

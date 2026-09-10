@@ -9,6 +9,7 @@ import { PrismaService } from '../../prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { assertCompagnieScope } from '../../common/scope';
 import { haversineKm, Point } from '../../common/geo';
+import { notifierVoyageursDeparts } from '../../common/notifier-voyageurs';
 import { signerSuiviToken } from '../../common/suivi-token';
 import { DepartStatut, SUIVI, UserRole } from '../../config/constants';
 import { AuthenticatedUser } from '../auth/strategies/jwt.strategy';
@@ -142,6 +143,47 @@ export class SuiviService {
       titre: 'Arrivée',
       corps: `${misAJour.trajet.villeArrivee.nom} : le car est arrivé.`,
       donnees: { departId },
+    });
+    return misAJour;
+  }
+
+  // Retard déclaré manuellement par le personnel (utile sans GPS, ou pour un
+  // retard connu avant le départ). Notifie les voyageurs.
+  async declarerRetard(
+    departId: number,
+    user: AuthenticatedUser,
+    minutesRetard: number,
+    motif?: string,
+  ) {
+    const depart = await this.chargerDepart(departId);
+    assertCompagnieScope(user, depart.trajet.compagnieId);
+
+    if (
+      depart.statut !== DepartStatut.PLANIFIE &&
+      depart.statut !== DepartStatut.EN_ROUTE
+    ) {
+      throw new BadRequestException(
+        `Impossible de déclarer un retard sur un départ ${depart.statut}`,
+      );
+    }
+
+    const misAJour = await this.prisma.depart.update({
+      where: { id: departId },
+      data: {
+        retardMinutes: minutesRetard,
+        // Aligne le palier notifié pour que le cron ne renotifie pas en-dessous.
+        retardNotifieMinutes: minutesRetard,
+      },
+      include: DEPART_POUR_SUIVI,
+    });
+
+    await this.notifierVoyageurs(departId, {
+      type: 'depart.retard',
+      titre: 'Retard annoncé',
+      corps:
+        `${misAJour.trajet.villeDepart.nom} → ${misAJour.trajet.villeArrivee.nom} : ` +
+        `retard d'environ ${minutesRetard} min${motif ? ` (${motif})` : ''}.`,
+      donnees: { departId, retardMinutes: minutesRetard },
     });
     return misAJour;
   }
@@ -330,20 +372,15 @@ export class SuiviService {
     }
   }
 
-  private async notifierVoyageurs(
+  private notifierVoyageurs(
     departId: number,
     notif: Parameters<NotificationsService['notifier']>[1],
   ) {
-    const reservations = await this.prisma.reservation.findMany({
-      where: {
-        departId,
-        statut: 'confirmee',
-        utilisateurId: { not: null },
-      },
-      select: { utilisateurId: true },
-    });
-    for (const r of reservations) {
-      await this.notifications.notifier(r.utilisateurId, notif);
-    }
+    return notifierVoyageursDeparts(
+      this.prisma,
+      this.notifications,
+      [departId],
+      notif,
+    );
   }
 }

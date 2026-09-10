@@ -115,3 +115,57 @@ describe('SuiviService.demarrer', () => {
     );
   });
 });
+
+describe('SuiviService.declarerRetard', () => {
+  let prisma: any;
+  let notifier: jest.Mock;
+  let service: SuiviService;
+
+  beforeEach(() => {
+    notifier = jest.fn();
+    prisma = {
+      depart: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 5,
+          statut: 'planifie',
+          dateDepart: new Date('2026-09-15'),
+          trajet: { ...trajet, villeDepart: { nom: 'Korhogo' } },
+        }),
+        update: jest.fn().mockResolvedValue({
+          id: 5,
+          retardMinutes: 45,
+          trajet: { ...trajet, villeDepart: { nom: 'Korhogo' } },
+        }),
+      },
+      reservation: {
+        findMany: jest.fn().mockResolvedValue([{ utilisateurId: 9 }]),
+      },
+    };
+    service = new SuiviService(prisma, { notifier } as never);
+  });
+
+  it('enregistre le retard et notifie les voyageurs', async () => {
+    await service.declarerRetard(5, staff(), 45, 'panne');
+    expect(prisma.depart.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: { retardMinutes: 45, retardNotifieMinutes: 45 },
+      }),
+    );
+    expect(notifier).toHaveBeenCalledWith(
+      9,
+      expect.objectContaining({ type: 'depart.retard' }),
+    );
+  });
+
+  it('refuse sur un départ déjà arrivé', async () => {
+    prisma.depart.findUnique.mockResolvedValue({
+      id: 5,
+      statut: 'arrive',
+      dateDepart: new Date(),
+      trajet,
+    });
+    await expect(
+      service.declarerRetard(5, staff(), 10),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+});

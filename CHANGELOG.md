@@ -1,5 +1,20 @@
 # Changelog - Yègo API
 
+## [0.20.0] - 2026-09-10
+
+### 🔔 Notifications de changement d'horaire et de retard
+- **Changement d'heure** : `PATCH /trajets/:id` qui modifie `heureDepart`
+  notifie (`depart.horaire_modifie`, ancienne → nouvelle heure) les voyageurs
+  de tous les départs à venir encore actifs de ce trajet.
+- **Changement de date** : `PATCH /departs/:id` qui modifie `dateDepart`
+  notifie (`depart.date_modifiee`) les voyageurs de ce départ.
+- **Retard manuel** : `POST /departs/:id/retard` (perm `depart:manage`,
+  cloisonné) `{ minutesRetard, motif? }` — pose `retardMinutes`, aligne le
+  palier notifié (le cron GPS ne renotifiera pas en-dessous) et envoie
+  `depart.retard`. Utilisable sans GPS ou pour un retard connu à l'avance.
+- Le retard automatique par GPS (cron 5 min) est arrivé en 0.19.0.
+- Helper partagé `common/notifier-voyageurs.ts`.
+
 ## [0.19.0] - 2026-09-10
 
 ### 📍 Suivi GPS temps réel des départs
