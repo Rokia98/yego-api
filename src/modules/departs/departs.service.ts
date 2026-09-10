@@ -166,12 +166,19 @@ export class DepartsService {
     });
     if (!depart) throw new NotFoundException(`Départ ${id} introuvable`);
 
-    const occupes = await siegesOccupesDepart(this.prisma, id);
+    const occupes = [...(await siegesOccupesDepart(this.prisma, id))].sort();
+    const placesVendues = depart.placesTotales - depart.placesDisponibles;
 
     return {
       placesTotales: depart.vehicule?.capacite ?? depart.placesTotales,
       placesDisponibles: depart.placesDisponibles,
-      occupes: [...occupes].sort(),
+      // Nombre total de places vendues (toutes réservations non libérées).
+      placesVendues,
+      // Sièges précis déjà pris (choix voyageur + tickets émis).
+      occupes,
+      // Places vendues sans siège attribué (placement libre) : le plan ne peut
+      // pas les situer ; le client bloque ce nombre de sièges ou l'affiche.
+      placesSansSiege: Math.max(0, placesVendues - occupes.length),
     };
   }
 

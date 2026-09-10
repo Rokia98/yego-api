@@ -411,6 +411,11 @@ describe('Yègo API (e2e)', () => {
         .then((r) => {
           expect(typeof r.body.placesTotales).toBe('number');
           expect(Array.isArray(r.body.occupes)).toBe(true);
+          expect(typeof r.body.placesVendues).toBe('number');
+          expect(typeof r.body.placesSansSiege).toBe('number');
+          expect(r.body.placesSansSiege).toBe(
+            Math.max(0, r.body.placesVendues - r.body.occupes.length),
+          );
         }));
 
     it('le voyageur réserve des sièges précis', () =>
