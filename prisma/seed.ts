@@ -26,19 +26,20 @@ async function main() {
   console.log('🌱 Démarrage du seed...');
 
   // --- Villes -------------------------------------------------------------
-  const nomsVilles = [
-    'Abidjan',
-    'Yamoussoukro',
-    'Bouaké',
-    'Korhogo',
-    'Ferkessédougou',
-    'Man',
-    'Daloa',
-    'San-Pédro',
+  // Coordonnées approximatives du centre-ville (ETA du suivi GPS).
+  const nomsVilles: { nom: string; latitude: number; longitude: number }[] = [
+    { nom: 'Abidjan', latitude: 5.3599, longitude: -4.0083 },
+    { nom: 'Yamoussoukro', latitude: 6.8276, longitude: -5.2893 },
+    { nom: 'Bouaké', latitude: 7.6906, longitude: -5.0303 },
+    { nom: 'Korhogo', latitude: 9.4581, longitude: -5.6296 },
+    { nom: 'Ferkessédougou', latitude: 9.5928, longitude: -5.1947 },
+    { nom: 'Man', latitude: 7.4125, longitude: -7.5537 },
+    { nom: 'Daloa', latitude: 6.8774, longitude: -6.4502 },
+    { nom: 'San-Pédro', latitude: 4.7485, longitude: -6.6363 },
   ];
   const villes: Record<string, Ville> = {};
-  for (const nom of nomsVilles) {
-    villes[nom] = await prisma.ville.create({ data: { nom } });
+  for (const v of nomsVilles) {
+    villes[v.nom] = await prisma.ville.create({ data: v });
   }
   console.log(`✅ ${nomsVilles.length} villes créées`);
 

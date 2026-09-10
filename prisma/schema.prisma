@@ -13,6 +13,10 @@ datasource db {
 model Ville {
   id             Int       @id @default(autoincrement())
   nom            String    @unique
+  // Coordonnées du centre-ville, utilisées pour l'ETA du suivi GPS
+  // (distance à vol d'oiseau × facteur route). Optionnelles.
+  latitude       Float?
+  longitude      Float?
   trajetsDepart  Trajet[]  @relation("VilleDepart")
   trajetsArrivee Trajet[]  @relation("VilleArrivee")
 
@@ -106,16 +110,43 @@ model Depart {
   dateDepart         DateTime      @map("date_depart") @db.Date
   placesTotales      Int           @map("places_totales")
   placesDisponibles  Int           @map("places_disponibles")
+  // planifie -> en_route (parti, GPS actif) -> arrive ; annule à tout moment.
   statut             String        @default("planifie")
+  demarreA           DateTime?     @map("demarre_a")
+  termineA           DateTime?     @map("termine_a")
+  // Retard estimé (minutes) sur l'heure d'arrivée prévue. 0 = à l'heure.
+  retardMinutes      Int           @default(0) @map("retard_minutes")
+  // Dernier palier de retard déjà notifié aux voyageurs (anti-spam du cron).
+  retardNotifieMinutes Int         @default(0) @map("retard_notifie_minutes")
 
-  trajet             Trajet        @relation(fields: [trajetId], references: [id], onDelete: Cascade)
-  vehicule           Vehicule?     @relation(fields: [vehiculeId], references: [id])
-  chauffeur          Chauffeur?    @relation(fields: [chauffeurId], references: [id])
+  trajet             Trajet           @relation(fields: [trajetId], references: [id], onDelete: Cascade)
+  vehicule           Vehicule?        @relation(fields: [vehiculeId], references: [id])
+  chauffeur          Chauffeur?       @relation(fields: [chauffeurId], references: [id])
   reservations       Reservation[]
+  positions          PositionDepart[]
 
   @@unique([trajetId, dateDepart])
   @@index([dateDepart])
   @@map("departs")
+}
+
+// Point GPS envoyé périodiquement par le téléphone du chauffeur pendant un
+// départ « en_route ». Purgé après le trajet (voir MaintenanceService).
+model PositionDepart {
+  id           Int      @id @default(autoincrement())
+  departId     Int      @map("depart_id")
+  latitude     Float
+  longitude    Float
+  vitesse      Float?   // km/h
+  cap          Float?   // degrés (0 = nord)
+  precision    Float?   // mètres (précision GPS annoncée)
+  mesureA      DateTime @map("mesure_a")     // horodatage de l'appareil
+  enregistreA  DateTime @default(now()) @map("enregistre_a") // réception serveur
+
+  depart       Depart   @relation(fields: [departId], references: [id], onDelete: Cascade)
+
+  @@index([departId, mesureA])
+  @@map("positions_depart")
 }
 
 model Utilisateur {

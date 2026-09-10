@@ -69,6 +69,34 @@ export enum TicketStatut {
   ANNULE = 'annule',
 }
 
+export enum DepartStatut {
+  PLANIFIE = 'planifie',
+  EN_ROUTE = 'en_route',
+  ARRIVE = 'arrive',
+  ANNULE = 'annule',
+}
+
+// Suivi GPS temps réel d'un départ en cours.
+export const SUIVI = {
+  // Durée de vie du jeton de suivi remis au chauffeur au démarrage.
+  TOKEN_TTL_HEURES: 24,
+  // Au-delà, la dernière position est considérée périmée (plus de "live").
+  POSITION_FRAICHE_SECONDES: 120,
+  // Trajet routier ≈ distance à vol d'oiseau × ce facteur.
+  FACTEUR_ROUTE: 1.3,
+  // Vitesse de repli quand aucune vitesse fiable n'est disponible (km/h).
+  VITESSE_DEFAUT_KMH: 65,
+  // Retard (min) à partir duquel on considère un départ "en retard".
+  RETARD_SEUIL_MINUTES: 20,
+  // Palier de ré-notification : on ne renotifie qu'au franchissement d'un
+  // nouveau multiple de cette valeur.
+  RETARD_PALIER_MINUTES: 15,
+  // Rétention des points GPS après la fin du trajet.
+  RETENTION_POSITIONS_HEURES: 48,
+  // Historique renvoyé par l'API (nb max de points).
+  HISTORIQUE_MAX_POINTS: 500,
+} as const;
+
 // Dashboard : période par défaut (sans `from`/`to`) et bornes pour éviter
 // d'agréger un historique trop large en une seule requête.
 export const DASHBOARD = {

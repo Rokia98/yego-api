@@ -1,5 +1,33 @@
 # Changelog - Yègo API
 
+## [0.19.0] - 2026-09-10
+
+### 📍 Suivi GPS temps réel des départs
+- Cycle de vie du départ : `planifie` → `en_route` → `arrive` (+ `annule`).
+  Nouveaux champs `Depart` : `demarreA`, `termineA`, `retardMinutes`,
+  `retardNotifieMinutes`. Nouveau modèle `PositionDepart`. `Ville.latitude` /
+  `longitude` (ETA). Migration `20260910120000_suivi_gps`.
+- **App chauffeur sans compte** : `POST /departs/:id/demarrer`
+  (perm `depart:manage`, cloisonné) renvoie un `suiviToken` éphémère (HMAC,
+  24 h, lié au départ). Le téléphone du chauffeur poste ensuite ses positions
+  avec ce jeton en `Authorization: Bearer`.
+- `POST /departs/:id/position` (jeton de suivi) : `{ latitude, longitude,
+  vitesse?, cap?, precision?, mesureA? }`, réponse minimale. Refusé si le
+  départ n'est pas `en_route`.
+- `POST /departs/:id/arriver` (jeton de suivi) : clôt le trajet, notifie
+  `depart.arrive`.
+- `GET /departs/:id/suivi` (voyageur avec réservation / personnel compagnie /
+  admin) : dernière position + fraîcheur + **ETA** (haversine × facteur route /
+  vitesse) + heure d'arrivée prévue + retard.
+- `GET /departs/:id/suivi/historique?depuis&limite` : trace du trajet (≤ 500
+  points).
+- Notifications : `depart.demarre`, `depart.arrive`, et **`depart.retard`**
+  (cron 5 min : ETA vs heure prévue, ré-notifié par paliers de 15 min).
+- `MaintenanceService` : cron de suivi (retards + clôture de sécurité des
+  départs `en_route` oubliés) et purge quotidienne des points GPS des trajets
+  terminés depuis > 48 h.
+- Helpers `common/geo.ts` (haversine) et `common/suivi-token.ts` + specs.
+
 ## [0.18.0] - 2026-09-10
 
 ### 🔐 Validation des tickets hors-ligne (QR signés)

@@ -2,6 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { SuiviService } from '../suivi/suivi.service';
+import { DepartStatut, SUIVI } from '../../config/constants';
 
 /**
  * Tâches d'entretien périodiques (hors expiration des réservations, gérée
@@ -14,6 +16,7 @@ export class MaintenanceService {
   constructor(
     private prisma: PrismaService,
     private notifications: NotificationsService,
+    private suivi: SuiviService,
   ) {}
 
   // Passe les abonnements arrivés à échéance de 'actif' à 'expire'.
@@ -94,5 +97,114 @@ export class MaintenanceService {
       this.logger.log(`${reservations.length} rappel(s) de départ envoyé(s).`);
     }
     return reservations.length;
+  }
+
+  // Suivi des départs en cours : notifie les voyageurs d'un retard significatif
+  // (ETA vs heure d'arrivée prévue) et clôture les départs oubliés en_route.
+  @Cron(CronExpression.EVERY_5_MINUTES)
+  async suivreDepartsEnCours(): Promise<{ retards: number; clotures: number }> {
+    const enRoute = await this.prisma.depart.findMany({
+      where: { statut: DepartStatut.EN_ROUTE },
+      include: {
+        trajet: {
+          include: {
+            villeDepart: { select: { nom: true } },
+            villeArrivee: {
+              select: { nom: true, latitude: true, longitude: true },
+            },
+          },
+        },
+      },
+    });
+
+    let retards = 0;
+    let clotures = 0;
+
+    for (const depart of enRoute) {
+      const derniere = await this.prisma.positionDepart.findFirst({
+        where: { departId: depart.id },
+        orderBy: { mesureA: 'desc' },
+      });
+
+      // Clôture de sécurité : parti depuis longtemps et plus aucun signe de vie.
+      const partiDepuisH = depart.demarreA
+        ? (Date.now() - depart.demarreA.getTime()) / 3_600_000
+        : 0;
+      const silenceH = derniere
+        ? (Date.now() - derniere.mesureA.getTime()) / 3_600_000
+        : partiDepuisH;
+      if (partiDepuisH > SUIVI.RETENTION_POSITIONS_HEURES && silenceH > 3) {
+        await this.prisma.depart.update({
+          where: { id: depart.id },
+          data: { statut: DepartStatut.ARRIVE, termineA: new Date() },
+        });
+        clotures++;
+        continue;
+      }
+
+      const { eta, retard } = this.suivi.calculerEta(depart, derniere);
+      if (!eta || !retard) continue;
+
+      // On ne renotifie qu'au franchissement d'un nouveau palier de retard.
+      const palier =
+        Math.floor(eta.retardMinutes / SUIVI.RETARD_PALIER_MINUTES) *
+        SUIVI.RETARD_PALIER_MINUTES;
+      if (palier <= depart.retardNotifieMinutes) {
+        await this.prisma.depart.update({
+          where: { id: depart.id },
+          data: { retardMinutes: eta.retardMinutes },
+        });
+        continue;
+      }
+
+      const reservations = await this.prisma.reservation.findMany({
+        where: {
+          departId: depart.id,
+          statut: 'confirmee',
+          utilisateurId: { not: null },
+        },
+        select: { id: true, utilisateurId: true },
+      });
+      const t = depart.trajet;
+      for (const r of reservations) {
+        await this.notifications.notifier(r.utilisateurId, {
+          type: 'depart.retard',
+          titre: 'Retard signalé',
+          corps: `${t.villeDepart.nom} → ${t.villeArrivee.nom} : arrivée estimée avec environ ${eta.retardMinutes} min de retard.`,
+          donnees: { departId: depart.id, retardMinutes: eta.retardMinutes },
+        });
+      }
+
+      await this.prisma.depart.update({
+        where: { id: depart.id },
+        data: {
+          retardMinutes: eta.retardMinutes,
+          retardNotifieMinutes: palier,
+        },
+      });
+      retards++;
+    }
+
+    if (retards > 0 || clotures > 0) {
+      this.logger.log(
+        `Suivi départs : ${retards} retard(s) notifié(s), ${clotures} clôture(s).`,
+      );
+    }
+    return { retards, clotures };
+  }
+
+  // Purge les points GPS des départs terminés depuis plus de N heures.
+  @Cron(CronExpression.EVERY_DAY_AT_3AM)
+  async purgerPositions(): Promise<number> {
+    const seuil = new Date(
+      Date.now() - SUIVI.RETENTION_POSITIONS_HEURES * 3_600_000,
+    );
+    const res = await this.prisma.positionDepart.deleteMany({
+      where: { depart: { statut: DepartStatut.ARRIVE, termineA: { lt: seuil } } },
+    });
+    if (res.count > 0) {
+      this.logger.log(`${res.count} point(s) GPS purgé(s).`);
+    }
+    return res.count;
   }
 }
