@@ -6,7 +6,9 @@ import {
 } from 'class-validator';
 
 // Taille maximale de l'image décodée (data-URI). ~40 Ko laisse la place à un
-// logo raisonnable sans peser sur la limite de corps de requête (100 Ko).
+// logo / avatar raisonnable sans peser sur la limite de corps de requête
+// (100 Ko). Pas de stockage fichier côté API (pas de S3/volume) : l'image
+// voyage soit en URL déjà hébergée, soit en data-URI compressée côté client.
 const TAILLE_MAX_OCTETS = 40 * 1024;
 
 const DATA_URI_IMAGE =
@@ -17,8 +19,8 @@ export function tailleBase64Octets(base64: string): number {
   return Math.floor((base64.length * 3) / 4) - padding;
 }
 
-@ValidatorConstraint({ name: 'estLogoValide', async: false })
-export class EstLogoValideConstraint implements ValidatorConstraintInterface {
+@ValidatorConstraint({ name: 'estImageValide', async: false })
+export class EstImageValideConstraint implements ValidatorConstraintInterface {
   validate(value: unknown): boolean {
     if (value === undefined || value === null || value === '') return true;
     if (typeof value !== 'string') return false;
@@ -32,17 +34,17 @@ export class EstLogoValideConstraint implements ValidatorConstraintInterface {
   }
 
   defaultMessage(): string {
-    return 'logoUrl doit être une URL http(s), ou un data:image/(png|jpeg|webp);base64 de moins de 40 Ko décodé';
+    return 'doit être une URL http(s), ou un data:image/(png|jpeg|webp);base64 de moins de 40 Ko décodé';
   }
 }
 
-export function EstLogoValide(options?: ValidationOptions): PropertyDecorator {
+export function EstImageValide(options?: ValidationOptions): PropertyDecorator {
   return (object, propertyName) => {
     registerDecorator({
       target: object.constructor,
       propertyName: propertyName as string,
       options,
-      validator: EstLogoValideConstraint,
+      validator: EstImageValideConstraint,
     });
   };
 }

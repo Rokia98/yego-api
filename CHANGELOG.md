@@ -1,5 +1,18 @@
 # Changelog - Yègo API
 
+## [0.23.0] - 2026-09-11
+
+### 🙂 Photo de profil voyageur
+- `Utilisateur.photoUrl` (migration `20260911090000_utilisateur_photo`), même
+  contrat que `Compagnie.logoUrl` : URL http(s) ou `data:image/(png|jpeg|webp)
+  ;base64` ≤ 40 Ko décodé (compressée côté client — pas d'upload fichier, pas
+  de stockage disque côté API). `PATCH /utilisateurs/:id { photoUrl }`
+  (cloisonné : soi-même ou admin), déjà l'endpoint de modification de profil
+  (`nom`/`email`/`motDePasse`).
+- Validateur généralisé : `common/validators/logo.validator.ts` renommé
+  `image.validator.ts` (`EstImageValide`), réutilisé par `Compagnie.logoUrl`
+  et `Utilisateur.photoUrl`.
+
 ## [0.22.0] - 2026-09-10
 
 ### 📞 Normalisation des numéros de téléphone (E.164)

@@ -154,6 +154,9 @@ model Utilisateur {
   nom              String
   telephone        String        @unique
   email            String?
+  // URL http(s) ou data-URI (image compressée côté client) — même contrat que
+  // Compagnie.logoUrl (voir EstImageValide). Pas de stockage fichier côté API.
+  photoUrl         String?       @map("photo_url")
   motDePasseHash   String?       @map("mot_de_passe_hash")
   role             String        @default("user")
   // Compte actif ? Un compte désactivé ne peut plus se connecter et ses

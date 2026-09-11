@@ -1,5 +1,5 @@
 import { IsString, IsOptional, IsEmail, MaxLength } from 'class-validator';
-import { EstLogoValide } from '../../../common/validators/logo.validator';
+import { EstImageValide } from '../../../common/validators/image.validator';
 
 export class CreateCompagnieDto {
   @IsString()
@@ -19,6 +19,6 @@ export class CreateCompagnieDto {
   @IsOptional()
   @IsString()
   @MaxLength(50000)
-  @EstLogoValide()
+  @EstImageValide()
   logoUrl?: string;
 }

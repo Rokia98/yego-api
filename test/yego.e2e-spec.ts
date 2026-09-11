@@ -14,6 +14,7 @@ describe('Yègo API (e2e)', () => {
   let fx: Fixture;
   const tok: Record<string, string> = {};
   const rtok: Record<string, string> = {};
+  const uid: Record<string, number> = {};
 
   beforeAll(async () => {
     // Neutralise le rate limiting global pour la suite e2e.
@@ -46,6 +47,7 @@ describe('Yègo API (e2e)', () => {
       const res = await http().post('/api/v1/auth/login').send(c).expect(201);
       tok[role] = res.body.accessToken;
       rtok[role] = res.body.refreshToken;
+      uid[role] = res.body.utilisateurId;
     }
   });
 
@@ -282,6 +284,35 @@ describe('Yègo API (e2e)', () => {
         .post(`/api/v1/compagnies/${compagnieId}/compte-admin`)
         .set(auth('gestionnaire'))
         .send({ nom: 'Gérant Ter', telephone: '0788445566' })
+        .expect(403));
+  });
+
+  // ---------------------------------------------------------------------------
+  describe('Profil voyageur : photo', () => {
+    const photo =
+      'data:image/png;base64,' + 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB'.repeat(4);
+
+    it('PATCH /utilisateurs/:id accepte une photo data-URI', async () => {
+      const r = await http()
+        .patch(`/api/v1/utilisateurs/${uid.voyageur}`)
+        .set(auth('voyageur'))
+        .send({ photoUrl: photo })
+        .expect(200);
+      expect(r.body.photoUrl).toBe(photo);
+    });
+
+    it('refuse une photo trop lourde / mauvais type (400)', () =>
+      http()
+        .patch(`/api/v1/utilisateurs/${uid.voyageur}`)
+        .set(auth('voyageur'))
+        .send({ photoUrl: 'data:application/pdf;base64,AAAA' })
+        .expect(400));
+
+    it("un voyageur ne peut pas modifier le profil d'un autre (403)", () =>
+      http()
+        .patch(`/api/v1/utilisateurs/${uid.voyageur}`)
+        .set(auth('agent'))
+        .send({ photoUrl: photo })
         .expect(403));
   });
 

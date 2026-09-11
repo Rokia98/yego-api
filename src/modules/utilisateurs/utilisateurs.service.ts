@@ -18,6 +18,7 @@ const UTILISATEUR_SAFE_SELECT = {
   nom: true,
   telephone: true,
   email: true,
+  photoUrl: true,
   role: true,
   compagnieId: true,
   dateCreation: true,
@@ -102,6 +103,7 @@ export class UtilisateursService {
       data: {
         nom: dto.nom,
         email: dto.email,
+        photoUrl: dto.photoUrl,
         ...(motDePasseHash && { motDePasseHash }),
       },
       select: UTILISATEUR_SAFE_SELECT,

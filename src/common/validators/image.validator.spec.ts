@@ -1,10 +1,10 @@
-import { EstLogoValideConstraint, tailleBase64Octets } from './logo.validator';
+import { EstImageValideConstraint, tailleBase64Octets } from './image.validator';
 
-const v = new EstLogoValideConstraint();
+const v = new EstImageValideConstraint();
 const dataUri = (mime: string, octets: number) =>
   `data:${mime};base64,${'A'.repeat(Math.ceil((octets * 4) / 3))}`;
 
-describe('EstLogoValide', () => {
+describe('EstImageValide', () => {
   it('accepte une URL http(s)', () => {
     expect(v.validate('https://cdn.exemple.ci/logo.png')).toBe(true);
     expect(v.validate('http://exemple.ci/l.svg')).toBe(true);
