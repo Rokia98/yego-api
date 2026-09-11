@@ -159,6 +159,12 @@ model Utilisateur {
   // Compagnie.logoUrl (voir EstImageValide). Pas de stockage fichier côté API.
   photoUrl         String?       @map("photo_url")
   motDePasseHash   String?       @map("mot_de_passe_hash")
+  // true pour un compte dont le mot de passe a été généré par un tiers (ex.
+  // POST /compagnies/:id/compte-admin) : le client doit inviter au changement
+  // via PATCH /auth/mot-de-passe, qui repasse ce flag à false. À ne pas
+  // confondre avec le champ de réponse `motDePasseTemporaire` (le mot de passe
+  // en clair, renvoyé une seule fois par POST /compagnies/:id/compte-admin).
+  doitChangerMotDePasse Boolean  @default(false) @map("doit_changer_mot_de_passe")
   role             String        @default("user")
   // Compte actif ? Un compte désactivé ne peut plus se connecter et ses
   // access tokens en cours sont invalidés (voir tokenVersion / JwtStrategy).

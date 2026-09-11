@@ -144,4 +144,46 @@ describe('AuthService', () => {
       );
     });
   });
+
+  describe('changerMotDePasse', () => {
+    const utilisateur = async () => ({
+      id: 3,
+      telephone: '+2250700000000',
+      role: 'company_admin',
+      compagnieId: 1,
+      tokenVersion: 0,
+      motDePasseHash: await bcrypt.hash('ancien123', 4),
+    });
+
+    it("rejette si l'ancien mot de passe est incorrect", async () => {
+      prisma.utilisateur.findUnique.mockResolvedValue(await utilisateur());
+      await expect(
+        service.changerMotDePasse(3, {
+          ancienMotDePasse: 'faux',
+          nouveauMotDePasse: 'nouveau123',
+        }),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('révoque les autres sessions, lève le flag et réémet des jetons', async () => {
+      const u = await utilisateur();
+      prisma.utilisateur.findUnique.mockResolvedValue(u);
+      prisma.$transaction.mockImplementation(async (ops: unknown[]) => [
+        { count: 2 },
+        { ...u, doitChangerMotDePasse: false, tokenVersion: 1 },
+      ]);
+
+      const res = await service.changerMotDePasse(3, {
+        ancienMotDePasse: 'ancien123',
+        nouveauMotDePasse: 'nouveau123',
+      });
+
+      expect(res.accessToken).toBe('signed.jwt.token');
+      expect(jwt.sign).toHaveBeenCalledWith(
+        expect.objectContaining({ sub: 3, pwTmp: false }),
+      );
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    });
+  });
 });

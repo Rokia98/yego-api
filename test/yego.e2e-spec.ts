@@ -270,6 +270,12 @@ describe('Yègo API (e2e)', () => {
           expect.objectContaining({ telephone: '+2250788001122' }),
         ]),
       );
+
+      // mot de passe généré par un tiers -> flag de changement obligatoire posé
+      const u = await prisma.utilisateur.findUnique({
+        where: { telephone: '+2250788001122' },
+      });
+      expect(u?.doitChangerMotDePasse).toBe(true);
     });
 
     it('compte-admin : 409 si le numéro est déjà rattaché à un autre compte', () =>
@@ -401,6 +407,53 @@ describe('Yègo API (e2e)', () => {
             .set(auth('gestionnaire'))
             .expect(404),
         ));
+  });
+
+  // ---------------------------------------------------------------------------
+  // Compte de test dédié (pas un compte du pool fx.comptes) : cette suite
+  // révoque les autres sessions et bump tokenVersion à chaque changement de
+  // mot de passe réussi, ce qui casserait les tokens partagés du reste du fichier.
+  describe('Changement de mot de passe', () => {
+    let token: string;
+
+    it('crée un compte de test', async () => {
+      const r = await http()
+        .post('/api/v1/auth/register')
+        .send({ nom: 'PwTest', telephone: '0788990011', motDePasse: 'MotDePasseTest1' })
+        .expect(201);
+      token = r.body.accessToken;
+    });
+
+    it("refuse un ancien mot de passe incorrect (401)", () =>
+      http()
+        .patch('/api/v1/auth/mot-de-passe')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ ancienMotDePasse: 'faux', nouveauMotDePasse: 'NouveauPass1' })
+        .expect(401));
+
+    it('change le mot de passe, lève le flag, réémet des jetons', async () => {
+      const r = await http()
+        .patch('/api/v1/auth/mot-de-passe')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ ancienMotDePasse: 'MotDePasseTest1', nouveauMotDePasse: 'NouveauPass1' })
+        .expect(200);
+      expect(r.body.accessToken).toEqual(expect.any(String));
+      expect(r.body.refreshToken).toEqual(expect.any(String));
+
+      const payload = JSON.parse(
+        Buffer.from(r.body.accessToken.split('.')[1], 'base64url').toString(),
+      );
+      expect(payload.pwTmp).toBe(false);
+
+      token = r.body.accessToken; // jeton frais (tokenVersion bumpé)
+    });
+
+    it("l'ancien mot de passe n'est plus valide (401)", () =>
+      http()
+        .patch('/api/v1/auth/mot-de-passe')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ ancienMotDePasse: 'MotDePasseTest1', nouveauMotDePasse: 'Autre123456' })
+        .expect(401));
   });
 
   // ---------------------------------------------------------------------------

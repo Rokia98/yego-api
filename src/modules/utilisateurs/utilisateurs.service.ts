@@ -21,6 +21,7 @@ const UTILISATEUR_SAFE_SELECT = {
   photoUrl: true,
   role: true,
   compagnieId: true,
+  doitChangerMotDePasse: true,
   dateCreation: true,
 };
 
@@ -104,7 +105,9 @@ export class UtilisateursService {
         nom: dto.nom,
         email: dto.email,
         photoUrl: dto.photoUrl,
-        ...(motDePasseHash && { motDePasseHash }),
+        // Un mot de passe changé ici (par soi-même ou un admin) n'est plus
+        // "temporaire", quel que soit le chemin emprunté pour le poser.
+        ...(motDePasseHash && { motDePasseHash, doitChangerMotDePasse: false }),
       },
       select: UTILISATEUR_SAFE_SELECT,
     });

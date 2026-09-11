@@ -10,6 +10,7 @@ import { createHash, randomBytes } from 'crypto';
 import { PrismaService } from '../../prisma.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { ChangerMotDePasseDto } from './dto/changer-mot-de-passe.dto';
 import { UserRole } from '../../config/constants';
 import { JwtPayload } from './strategies/jwt.strategy';
 
@@ -124,6 +125,51 @@ export class AuthService {
     };
   }
 
+  // Changement de mot de passe par le titulaire du compte (vérifie l'ancien).
+  // Lève le flag "mot de passe temporaire", révoque les sessions des AUTRES
+  // appareils (tokenVersion++ + refresh tokens révoqués) et réémet un couple
+  // access/refresh pour la session courante — le client peut continuer sans
+  // se reconnecter, avec un token qui porte désormais `pwTmp: false`.
+  async changerMotDePasse(
+    userId: number,
+    dto: ChangerMotDePasseDto,
+    ctx: ContexteRequete = {},
+  ) {
+    const utilisateur = await this.prisma.utilisateur.findUnique({
+      where: { id: userId },
+    });
+    if (!utilisateur || !utilisateur.motDePasseHash) {
+      throw new UnauthorizedException('Compte introuvable');
+    }
+
+    const ancienValide = await bcrypt.compare(
+      dto.ancienMotDePasse,
+      utilisateur.motDePasseHash,
+    );
+    if (!ancienValide) {
+      throw new UnauthorizedException("L'ancien mot de passe est incorrect");
+    }
+
+    const motDePasseHash = await bcrypt.hash(dto.nouveauMotDePasse, BCRYPT_ROUNDS);
+
+    const [, maj] = await this.prisma.$transaction([
+      this.prisma.refreshToken.updateMany({
+        where: { utilisateurId: userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      }),
+      this.prisma.utilisateur.update({
+        where: { id: userId },
+        data: {
+          motDePasseHash,
+          doitChangerMotDePasse: false,
+          tokenVersion: { increment: 1 },
+        },
+      }),
+    ]);
+
+    return this.emettreJetons(maj, ctx);
+  }
+
   async logout(refreshToken: string) {
     const tokenHash = this.hacher(refreshToken);
     await this.prisma.refreshToken.updateMany({
@@ -156,6 +202,7 @@ export class AuthService {
       role: string;
       compagnieId: number | null;
       tokenVersion: number;
+      doitChangerMotDePasse: boolean;
     },
     ctx: ContexteRequete,
   ) {
@@ -175,6 +222,7 @@ export class AuthService {
     role: string;
     compagnieId: number | null;
     tokenVersion: number;
+    doitChangerMotDePasse: boolean;
   }) {
     const payload: JwtPayload = {
       sub: utilisateur.id,
@@ -182,6 +230,7 @@ export class AuthService {
       role: utilisateur.role as UserRole,
       cid: utilisateur.compagnieId ?? null,
       tv: utilisateur.tokenVersion,
+      pwTmp: utilisateur.doitChangerMotDePasse,
     };
     return this.jwtService.sign(payload);
   }

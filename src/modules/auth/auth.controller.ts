@@ -4,6 +4,7 @@ import {
   Headers,
   HttpCode,
   Ip,
+  Patch,
   Post,
   UseGuards,
 } from '@nestjs/common';
@@ -15,6 +16,7 @@ import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { ChangerMotDePasseDto } from './dto/changer-mot-de-passe.dto';
 
 @Controller('auth')
 export class AuthController {
@@ -51,6 +53,22 @@ export class AuthController {
     @Headers('user-agent') userAgent?: string,
   ) {
     return this.authService.refresh(dto.refreshToken, { ip, userAgent });
+  }
+
+  // Changement de mot de passe par le titulaire (vérifie l'ancien). Lève le
+  // flag "mot de passe temporaire" et réémet un couple access/refresh —
+  // pas besoin de se reconnecter après. Révoque les AUTRES sessions.
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @HttpCode(200)
+  @Patch('mot-de-passe')
+  changerMotDePasse(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: ChangerMotDePasseDto,
+    @Ip() ip: string,
+    @Headers('user-agent') userAgent?: string,
+  ) {
+    return this.authService.changerMotDePasse(user.userId, dto, { ip, userAgent });
   }
 
   // Révoque le refresh token présenté (déconnexion de l'appareil courant).

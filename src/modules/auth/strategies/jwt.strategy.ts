@@ -13,6 +13,10 @@ export interface JwtPayload {
   cid: number | null;
   // tokenVersion au moment de l'émission : permet une révocation globale.
   tv: number;
+  // Mot de passe temporaire (généré par un tiers) à changer. Snapshot pris à
+  // l'émission du token ; se met à jour à la prochaine connexion ou après
+  // PATCH /auth/mot-de-passe (qui réémet un token).
+  pwTmp: boolean;
 }
 
 export interface AuthenticatedUser {

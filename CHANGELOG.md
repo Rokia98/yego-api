@@ -1,5 +1,26 @@
 # Changelog - Yègo API
 
+## [0.25.0] - 2026-09-11
+
+### 🔑 Changement de mot de passe obligatoire
+- `Utilisateur.doitChangerMotDePasse` (migration
+  `20260911110000_doit_changer_mot_de_passe`) : posé à `true` par `POST
+  /compagnies/:id/compte-admin` (création **et** régénération — mot de passe
+  généré par un tiers). Distinct du champ de réponse `motDePasseTemporaire`
+  de cette même route (le mot de passe en clair, renvoyé une seule fois).
+- Claim JWT **`pwTmp`** (snapshot à l'émission du token) — lu côté client
+  sans appel réseau supplémentaire, comme demandé par le dashboard.
+- `PATCH /auth/mot-de-passe` (Bearer) `{ ancienMotDePasse, nouveauMotDePasse }`
+  : vérifie l'ancien mot de passe, lève le flag, **révoque les sessions des
+  autres appareils** (`tokenVersion++` + refresh tokens révoqués) et réémet
+  un couple access/refresh pour la session courante (`pwTmp: false`
+  immédiatement, pas besoin de se reconnecter). Throttle 10/min.
+- `PATCH /utilisateurs/:id` (changement de mot de passe par ce chemin, sans
+  vérification de l'ancien) lève aussi le flag par cohérence.
+- Agents non concernés : leur mot de passe est choisi par leur créateur
+  (company_admin), pas généré par le système — hors périmètre de ce flag.
+- +2 unit, +4 e2e. **122 unit + 91 e2e verts.**
+
 ## [0.24.0] - 2026-09-11
 
 ### 📄 Documents d'inscription compagnie

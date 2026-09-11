@@ -111,6 +111,7 @@ export class CompagniesService {
           email: dto.email,
           motDePasseHash,
           actif: true,
+          doitChangerMotDePasse: true,
           tokenVersion: { increment: 1 },
         },
         select: { id: true, nom: true, telephone: true },
@@ -127,6 +128,7 @@ export class CompagniesService {
         role: UserRole.COMPANY_ADMIN,
         compagnieId: id,
         actif: true,
+        doitChangerMotDePasse: true,
       },
       select: { id: true, nom: true, telephone: true },
     });

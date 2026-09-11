@@ -45,6 +45,7 @@ describe('CompagniesService.creerCompteAdmin', () => {
           role: 'company_admin',
           compagnieId: 1,
           actif: true,
+          doitChangerMotDePasse: true,
           telephone: dto.telephone,
         }),
       }),
@@ -68,6 +69,7 @@ describe('CompagniesService.creerCompteAdmin', () => {
         where: { id: 7 },
         data: expect.objectContaining({
           motDePasseHash: expect.any(String),
+          doitChangerMotDePasse: true,
           tokenVersion: { increment: 1 },
         }),
       }),
