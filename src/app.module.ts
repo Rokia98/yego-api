@@ -25,6 +25,7 @@ import { TicketsModule } from './modules/tickets/tickets.module';
 import { PaiementsModule } from './modules/paiements/paiements.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { SuiviModule } from './modules/suivi/suivi.module';
+import { DocumentsModule } from './modules/documents/documents.module';
 
 @Module({
   imports: [
@@ -56,6 +57,7 @@ import { SuiviModule } from './modules/suivi/suivi.module';
     PaiementsModule,
     DashboardModule,
     SuiviModule,
+    DocumentsModule,
   ],
   providers: [
     PrismaService,

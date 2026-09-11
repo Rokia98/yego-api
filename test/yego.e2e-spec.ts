@@ -317,6 +317,93 @@ describe('Yègo API (e2e)', () => {
   });
 
   // ---------------------------------------------------------------------------
+  describe('Documents de compagnie', () => {
+    let docId: number;
+
+    it('le gestionnaire uploade un document (PDF)', async () => {
+      const r = await http()
+        .post(`/api/v1/compagnies/${fx.compagnieId}/documents`)
+        .set(auth('gestionnaire'))
+        .field('type', 'registre_commerce')
+        .attach('document', Buffer.from('%PDF-1.4 contenu de test'), 'registre.pdf')
+        .expect(201);
+      expect(r.body).toMatchObject({
+        compagnieId: fx.compagnieId,
+        type: 'registre_commerce',
+        nomFichier: 'registre.pdf',
+        mimeType: 'application/pdf',
+        statut: 'en_attente',
+      });
+      expect(r.body.cheminFichier).toBeUndefined();
+      docId = r.body.id;
+    });
+
+    it('refuse un type de fichier non autorisé (400)', () =>
+      http()
+        .post(`/api/v1/compagnies/${fx.compagnieId}/documents`)
+        .set(auth('gestionnaire'))
+        .field('type', 'autre')
+        .attach('document', Buffer.from('texte'), 'notes.txt')
+        .expect(400));
+
+    it("un agent (pas gestionnaire ni admin) ne peut pas uploader (403)", () =>
+      http()
+        .post(`/api/v1/compagnies/${fx.compagnieId}/documents`)
+        .set(auth('agent'))
+        .field('type', 'autre')
+        .attach('document', Buffer.from('%PDF-1.4'), 'x.pdf')
+        .expect(403));
+
+    it('GET liste les documents (gestionnaire)', () =>
+      http()
+        .get(`/api/v1/compagnies/${fx.compagnieId}/documents`)
+        .set(auth('gestionnaire'))
+        .expect(200)
+        .then((r) => {
+          expect(Array.isArray(r.body)).toBe(true);
+          expect(r.body.some((d: any) => d.id === docId)).toBe(true);
+        }));
+
+    it('télécharge le fichier (gestionnaire)', () =>
+      http()
+        .get(`/api/v1/compagnies/${fx.compagnieId}/documents/${docId}/fichier`)
+        .set(auth('gestionnaire'))
+        .expect(200)
+        .expect('Content-Type', 'application/pdf')
+        .then((r) => {
+          const contenu = Buffer.isBuffer(r.body) ? r.body.toString() : r.text;
+          expect(contenu).toContain('PDF');
+        }));
+
+    it('un gestionnaire ne peut pas valider/refuser (403), seul un admin peut', async () => {
+      await http()
+        .patch(`/api/v1/compagnies/${fx.compagnieId}/documents/${docId}`)
+        .set(auth('gestionnaire'))
+        .send({ statut: 'valide' })
+        .expect(403);
+
+      const r = await http()
+        .patch(`/api/v1/compagnies/${fx.compagnieId}/documents/${docId}`)
+        .set(auth('admin'))
+        .send({ statut: 'valide', commentaireAdmin: 'RC conforme' })
+        .expect(200);
+      expect(r.body).toMatchObject({ statut: 'valide', commentaireAdmin: 'RC conforme' });
+    });
+
+    it('supprime le document', () =>
+      http()
+        .delete(`/api/v1/compagnies/${fx.compagnieId}/documents/${docId}`)
+        .set(auth('gestionnaire'))
+        .expect(200)
+        .then(() =>
+          http()
+            .get(`/api/v1/compagnies/${fx.compagnieId}/documents/${docId}/fichier`)
+            .set(auth('gestionnaire'))
+            .expect(404),
+        ));
+  });
+
+  // ---------------------------------------------------------------------------
   describe('Parcours guichet complet', () => {
     let reservationId: number;
     let codeQr: string;

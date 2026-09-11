@@ -36,6 +36,7 @@ model Compagnie {
   vehicules     Vehicule[]
   chauffeurs    Chauffeur[]
   trajets       Trajet[]
+  documents     CompagnieDocument[]
   // Personnel rattaché à la compagnie : company_admin et agents guichet.
   utilisateurs  Utilisateur[]
 
@@ -324,4 +325,27 @@ model Remboursement {
   reservation         Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
 
   @@map("remboursements")
+}
+
+// Pièce d'inscription d'une compagnie (registre de commerce, autorisation de
+// transport, pièce d'identité du gérant…), à valider par l'admin plateforme.
+// Fichier stocké sur disque (volume Docker) ; seul le chemin est en base,
+// jamais exposé tel quel au client (voir DocumentsService).
+model CompagnieDocument {
+  id               Int       @id @default(autoincrement())
+  compagnieId      Int       @map("compagnie_id")
+  type             String
+  nomFichier       String    @map("nom_fichier")
+  cheminFichier    String    @map("chemin_fichier")
+  tailleOctets     Int       @map("taille_octets")
+  mimeType         String    @map("mime_type")
+  statut           String    @default("en_attente")
+  commentaireAdmin String?   @map("commentaire_admin")
+  dateUpload       DateTime  @default(now()) @map("date_upload")
+  dateRevue        DateTime? @map("date_revue")
+
+  compagnie        Compagnie @relation(fields: [compagnieId], references: [id], onDelete: Cascade)
+
+  @@index([compagnieId])
+  @@map("compagnie_documents")
 }

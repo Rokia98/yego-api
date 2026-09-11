@@ -47,6 +47,11 @@ services:
       FCM_PROJECT_ID: ${FCM_PROJECT_ID:-}
       FCM_CLIENT_EMAIL: ${FCM_CLIENT_EMAIL:-}
       FCM_PRIVATE_KEY: ${FCM_PRIVATE_KEY:-}
+      # Documents de compagnie (registre de commerce…) : stockés sur ce volume,
+      # pas en base. Survit aux redéploiements ; à sauvegarder comme yego_pgdata.
+      UPLOADS_DIR: /app/uploads
+    volumes:
+      - yego_uploads:/app/uploads
     ports:
       - "${API_PORT:-3000}:3000"
     healthcheck:
@@ -62,3 +67,4 @@ services:
 
 volumes:
   yego_pgdata:
+  yego_uploads:

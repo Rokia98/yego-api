@@ -84,6 +84,12 @@ export class EnvironmentVariables {
   @IsString()
   TICKET_SIGNING_PRIVATE_KEY?: string;
 
+  // Dossier de stockage des documents uploadés (compagnies…). En conteneur,
+  // pointe vers un volume Docker dédié pour survivre aux redéploiements.
+  @IsOptional()
+  @IsString()
+  UPLOADS_DIR = './uploads';
+
   // Liste d'origines séparées par des virgules. Vide/absent = aucune origine
   // navigateur autorisée (les clients non-navigateur ne sont pas concernés).
   @IsOptional()

@@ -76,6 +76,26 @@ export enum DepartStatut {
   ANNULE = 'annule',
 }
 
+export enum CompagnieDocumentType {
+  REGISTRE_COMMERCE = 'registre_commerce',
+  AUTORISATION_TRANSPORT = 'autorisation_transport',
+  PIECE_IDENTITE_GERANT = 'piece_identite_gerant',
+  AUTRE = 'autre',
+}
+
+export enum CompagnieDocumentStatut {
+  EN_ATTENTE = 'en_attente',
+  VALIDE = 'valide',
+  REFUSE = 'refuse',
+}
+
+// Pièces d'inscription d'une compagnie : stockage sur disque (volume Docker),
+// jamais en base — voir common/stockage-fichiers.ts et modules/documents.
+export const DOCUMENTS = {
+  TAILLE_MAX_OCTETS: 5 * 1024 * 1024, // 5 Mo
+  MIME_AUTORISES: ['application/pdf', 'image/png', 'image/jpeg'] as const,
+} as const;
+
 // Suivi GPS temps réel d'un départ en cours.
 export const SUIVI = {
   // Durée de vie du jeton de suivi remis au chauffeur au démarrage.

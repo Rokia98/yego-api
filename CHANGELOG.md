@@ -1,5 +1,27 @@
 # Changelog - Yègo API
 
+## [0.24.0] - 2026-09-11
+
+### 📄 Documents d'inscription compagnie
+- Modèle `CompagnieDocument` (migration `20260911100000_compagnie_documents`) :
+  type (`registre_commerce` / `autorisation_transport` /
+  `piece_identite_gerant` / `autre`), fichier, statut (`en_attente` / `valide`
+  / `refuse`), commentaire admin, dates upload/revue.
+- **Stockage disque** (pas de S3) : volume Docker dédié `yego_uploads` monté
+  sur `/app/uploads` (`UPLOADS_DIR`), à sauvegarder comme `yego_pgdata`. Le
+  chemin fichier n'est jamais exposé au client ; le fichier se télécharge via
+  une route API authentifiée, jamais en statique public.
+- `POST /compagnies/:id/documents` (multipart, champ `document` + `type`,
+  perm `compagnie:update` → company_admin de sa compagnie ou admin) : fichier
+  buffé en mémoire, écrit sur disque **seulement après** vérification de la
+  portée (pas de fichier orphelin sur un 403). PDF/PNG/JPEG ≤ 5 Mo.
+- `GET /compagnies/:id/documents` (liste), `GET /compagnies/:id/documents/
+  :docId/fichier` (téléchargement/aperçu), `DELETE /compagnies/:id/documents/
+  :docId` : même portée que l'upload.
+- `PATCH /compagnies/:id/documents/:docId { statut, commentaireAdmin? }` (perm
+  `compagnie:moderate`, admin plateforme uniquement) : décision de validation.
+- +9 unit, +6 e2e. **120 unit + 87 e2e verts.**
+
 ## [0.23.0] - 2026-09-11
 
 ### 🙂 Photo de profil voyageur

@@ -46,6 +46,11 @@ COPY --from=builder --chown=node:node /app/package.json ./package.json
 COPY --chown=node:node docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
+# Dossier des documents uploadés (monté en volume, voir docker-compose.yml) :
+# créé avec les droits du user non-root AVANT le premier montage, pour que
+# Docker copie ces permissions dans le volume vide.
+RUN mkdir -p /app/uploads && chown node:node /app/uploads
+
 USER node
 
 EXPOSE 3000

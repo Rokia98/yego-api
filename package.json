@@ -1,6 +1,6 @@
 {
   "name": "yego-api",
-  "version": "0.23.0",
+  "version": "0.24.0",
   "description": "API back-end de la plateforme Yègo (réservation de tickets de transport)",
   "license": "UNLICENSED",
   "scripts": {
@@ -43,6 +43,7 @@
     "express": "^4.21.0",
     "firebase-admin": "^12.7.0",
     "helmet": "^7.1.0",
+    "multer": "^2.3.0",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
     "prisma": "^5.19.0",
@@ -55,6 +56,7 @@
     "@types/bcrypt": "^5.0.2",
     "@types/express": "^4.17.21",
     "@types/jest": "^29.5.12",
+    "@types/multer": "^1.4.13",
     "@types/node": "^20.14.0",
     "@types/passport-jwt": "^4.0.1",
     "@types/supertest": "^6.0.2",
