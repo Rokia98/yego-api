@@ -1,6 +1,7 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
+import { JwtService } from '@nestjs/jwt';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma.service';
@@ -49,6 +50,17 @@ describe('Yègo API (e2e)', () => {
       rtok[role] = res.body.refreshToken;
       uid[role] = res.body.utilisateurId;
     }
+
+    // Agent de l'AUTRE compagnie : jeton signé directement (pas de login HTTP,
+    // pour ne pas consommer le quota /auth/login déjà utilisé ci-dessus).
+    tok.autreAgent = app.get(JwtService).sign({
+      sub: fx.autreAgentId,
+      telephone: '+2250709998888',
+      role: 'agent',
+      cid: fx.autreCompagnieId,
+      tv: 0,
+      pwTmp: false,
+    });
   });
 
   afterAll(async () => {
@@ -1014,6 +1026,37 @@ describe('Yègo API (e2e)', () => {
         .then((r) => {
           expect(r.body.clePublique).toContain('BEGIN PUBLIC KEY');
           expect(r.body.tickets.some((t: any) => t.codeQr === codeQr)).toBe(true);
+        }));
+
+    // Sécurité inter-compagnies : un agent d'une compagnie ne doit jamais
+    // pouvoir scanner (ou même consulter le manifeste) des tickets d'une
+    // AUTRE compagnie — cf. valider() dans tickets.service.ts.
+    it("un agent d'une autre compagnie ne peut ni lire le manifeste...", () =>
+      http()
+        .get(`/api/v1/tickets/depart/${fx.departFuturId}/manifeste`)
+        .set(auth('autreAgent'))
+        .expect(403));
+
+    it('...ni valider un ticket de cette compagnie (403, tracé en audit)', () =>
+      http()
+        .post(`/api/v1/tickets/valider/${codeQr}`)
+        .set(auth('autreAgent'))
+        .expect(403)
+        .then((r) =>
+          expect(r.body.message).toMatch(/n'appartient pas à un départ de votre compagnie/),
+        ));
+
+    it('...ni via la synchronisation hors-ligne (même garde)', () =>
+      http()
+        .post('/api/v1/tickets/validations/sync')
+        .set(auth('autreAgent'))
+        .send({ scans: [{ codeQr }] })
+        .expect(201)
+        .then((r) => {
+          // La sync avale les erreurs par ticket (best-effort) : le refus se
+          // lit dans le résultat individuel, pas dans le code HTTP global.
+          expect(r.body.resultats[0].valide).toBe(false);
+          expect(r.body.resultats[0].message).toMatch(/hors de votre compagnie/);
         }));
 
     it('sync : 1er scan valide, 2e scan « déjà utilisé »', async () => {

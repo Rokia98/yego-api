@@ -1,3 +1,4 @@
+import { ForbiddenException } from '@nestjs/common';
 import { TicketsService } from './tickets.service';
 import { UserRole } from '../../config/constants';
 import { AuthenticatedUser } from '../auth/strategies/jwt.strategy';
@@ -110,5 +111,74 @@ describe('TicketsService.historiqueValidations', () => {
       resultat: 'introuvable',
       reservation: null,
     });
+  });
+});
+
+describe('TicketsService.valider — cloisonnement par compagnie', () => {
+  let prisma: any;
+  let audit: { record: jest.Mock };
+  let service: TicketsService;
+
+  const ticketCompagnie1 = {
+    id: 42,
+    statut: 'valide',
+    reservation: {
+      depart: { trajet: { compagnieId: 1 } },
+    },
+  };
+
+  beforeEach(() => {
+    audit = { record: jest.fn() };
+    prisma = {
+      ticket: {
+        findUnique: jest.fn().mockResolvedValue(ticketCompagnie1),
+        update: jest.fn().mockResolvedValue({}),
+      },
+    };
+    service = new TicketsService(prisma, audit as never);
+  });
+
+  it("refuse (403) un agent d'une AUTRE compagnie, journalise l'attempt, ne touche pas le ticket", async () => {
+    await expect(
+      service.valider('un-code-qr', {
+        userId: 8,
+        role: UserRole.AGENT,
+        compagnieId: 2, // UTB, différent du ticket (compagnie 1)
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(prisma.ticket.update).not.toHaveBeenCalled();
+    expect(audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'ticket.validation',
+        entiteId: 42,
+        acteurId: 8,
+        metadata: expect.objectContaining({ resultat: 'refuse_hors_compagnie' }),
+      }),
+    );
+  });
+
+  it('accepte un agent de la MÊME compagnie', async () => {
+    const res = await service.valider('un-code-qr', {
+      userId: 5,
+      role: UserRole.AGENT,
+      compagnieId: 1,
+    });
+    expect(res.valide).toBe(true);
+    expect(prisma.ticket.update).toHaveBeenCalled();
+  });
+
+  it("l'admin plateforme n'est jamais bloqué par le cloisonnement", async () => {
+    const res = await service.valider('un-code-qr', {
+      userId: 1,
+      role: UserRole.ADMIN,
+      compagnieId: null,
+    });
+    expect(res.valide).toBe(true);
+  });
+
+  it('sans contexte (ctx absent), pas de vérification de portée', async () => {
+    const res = await service.valider('un-code-qr');
+    expect(res.valide).toBe(true);
   });
 });

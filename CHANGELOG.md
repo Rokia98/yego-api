@@ -1,5 +1,22 @@
 # Changelog - Yègo API
 
+## [0.25.1] - 2026-09-11
+
+### 🔒 Vérification : cloisonnement inter-compagnies de la validation de ticket
+- Aucun changement de comportement — `TicketsService.valider()` bloquait déjà
+  un agent scannant un ticket d'une autre compagnie (403 + audit
+  `refuse_hors_compagnie`), y compris via le manifeste (`GET /tickets/depart/
+  :id/manifeste`) et la synchronisation hors-ligne (`POST /tickets/
+  validations/sync`). **Vérifié en direct** sur le conteneur (agent UTB vs
+  ticket CHONCO frais) : 403 sur le scan direct, 403 sur le manifeste, refus
+  individuel sur la sync — attentat tracé en audit avec l'acteur et le ticket.
+- Ce chemin n'avait pas de test dédié : ajout de **+4 unit** (`TicketsService.
+  valider` — autre compagnie/même compagnie/admin/sans contexte) et **+3 e2e**
+  (scan direct, manifeste, sync), avec un agent d'une seconde compagnie signé
+  directement en JWT dans le test (pas de login HTTP superflu — le throttle
+  `/auth/login` de la suite est déjà à quota).
+- **126 unit + 94 e2e verts.**
+
 ## [0.25.0] - 2026-09-11
 
 ### 🔑 Changement de mot de passe obligatoire

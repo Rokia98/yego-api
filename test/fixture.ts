@@ -12,6 +12,7 @@ export interface Fixture {
   departId: number;
   departFuturId: number;
   departBouakeId: number;
+  autreAgentId: number;
   comptes: {
     admin: { telephone: string; motDePasse: string };
     gestionnaire: { telephone: string; motDePasse: string };
@@ -78,6 +79,18 @@ export async function reinitialiser(prisma: PrismaService): Promise<Fixture> {
       { nom: 'Voyageur', telephone: '+2250701234567', role: 'user', motDePasseHash: hash },
     ],
   });
+  // Agent de l'AUTRE compagnie — pas de compte de test dans `comptes` (pas de
+  // login HTTP, throttle /auth/login déjà à quota) : son JWT est signé
+  // directement dans le test (voir yego.e2e-spec.ts), à partir de son id.
+  const autreAgent = await prisma.utilisateur.create({
+    data: {
+      nom: 'Agent Autre Compagnie',
+      telephone: '+2250709998888',
+      role: 'agent',
+      compagnieId: autre.id,
+      motDePasseHash: hash,
+    },
+  });
 
   const heure = (h: string) => new Date(`1970-01-01T${h}:00.000Z`);
   const trajet = await prisma.trajet.create({
@@ -130,6 +143,7 @@ export async function reinitialiser(prisma: PrismaService): Promise<Fixture> {
     departId: departProche.id,
     departFuturId: departFutur.id,
     departBouakeId: departBouake.id,
+    autreAgentId: autreAgent.id,
     comptes: {
       admin: { telephone: '+2250700000001', motDePasse: MDP },
       gestionnaire: { telephone: '+2250700000002', motDePasse: MDP },
