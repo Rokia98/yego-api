@@ -26,6 +26,8 @@ const MDP = 'MotDePasseTest1';
 // Remet la base de test à un état connu, minimal, et renvoie les identifiants.
 export async function reinitialiser(prisma: PrismaService): Promise<Fixture> {
   // Ordre : enfants avant parents.
+  await prisma.messageSupport.deleteMany();
+  await prisma.demandeSupport.deleteMany();
   await prisma.ticket.deleteMany();
   await prisma.remboursement.deleteMany();
   await prisma.paiement.deleteMany();

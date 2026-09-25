@@ -1,5 +1,36 @@
 # Changelog - Yègo API
 
+## [0.27.0] - 2026-09-25
+
+### 🛟 Module Support (demandes d'assistance) — contrat proposé par yego-dashboard
+- Modèles `DemandeSupport` + `MessageSupport` (migration
+  `20260925090000_support`). Catégories `reservation | paiement |
+  remboursement | ticket | compte | abonnement | technique | autre` ; statut
+  `ouverte | en_cours | resolue | fermee` ; priorité `normale | haute`.
+- Perms `support:create` (user, agent, company_admin) et `support:manage`
+  (admin ; company_admin sur les demandes **voyageurs** de sa compagnie).
+- `compagnieId` dérivé côté serveur : `cid` du personnel ; compagnie du départ
+  si un voyageur joint SA réservation (sinon 403) ; sinon null. Le personnel
+  ne peut joindre qu'une réservation de sa compagnie.
+- Portée : voyageur / agent → leurs demandes ; company_admin → celles de sa
+  compagnie (personnel + voyageurs) ; admin → toutes. Hors portée → 404.
+- Routes (JWT) : `POST /support/demandes` (throttle 5/min ; admin → 403),
+  `GET /support/demandes` (`statut`, `categorie`, `origine=voyageur|compagnie`,
+  `compagnieId` admin, `q` sujet/nom/#id ; tri `dernierMessageA` desc),
+  `GET /support/demandes/:id` (+ `messages[]` chronologiques, notes internes
+  masquées hors admin), `POST /support/demandes/:id/messages` (throttle 20/min ;
+  `interne` admin seulement ; auteur ou traitant ; 400 si fermée),
+  `PATCH /support/demandes/:id` (traitant : statut + priorité ; auteur :
+  `statut=fermee` seulement), `GET /support/compteurs` → `{ ouverte, en_cours }`.
+- Transitions : réponse d'un traitant sur `ouverte` → `en_cours` ; relance de
+  l'auteur sur `resolue` → `ouverte`. Une note interne ne change ni statut, ni
+  `nbMessages`, ni `dernierMessageA`.
+- Le company_admin lit les demandes de ses agents mais ne les traite pas
+  (réservé à l'équipe Yègo) : répondre → 403.
+- Notifications `support.reponse` (réponse d'un traitant) et `support.statut`
+  (passage à `resolue`) ; audit `support.statut` sur changement par un traitant.
+- +11 e2e. **145 unit + 127 e2e verts.**
+
 ## [0.26.0] - 2026-09-24
 
 ### 🔒 Correctifs de sécurité (audit — failles critiques)

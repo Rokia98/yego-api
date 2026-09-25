@@ -897,6 +897,221 @@ describe('Yègo API (e2e)', () => {
   });
 
   // ---------------------------------------------------------------------------
+  describe('Support (demandes)', () => {
+    let demandeVoyageur: number;
+    let demandeAgent: number;
+
+    it('voyageur : demande rattachée à la compagnie via SA réservation', async () => {
+      const resa = await http()
+        .post('/api/v1/reservations')
+        .set(auth('voyageur'))
+        .send({ departId: fx.departFuturId, nombrePlaces: 1 })
+        .expect(201);
+      const r = await http()
+        .post('/api/v1/support/demandes')
+        .set(auth('voyageur'))
+        .send({
+          categorie: 'paiement',
+          sujet: 'Paiement débité deux fois',
+          message: 'Bonjour, mon compte Wave a été débité deux fois.',
+          reservationId: resa.body.id,
+        })
+        .expect(201);
+      demandeVoyageur = r.body.id;
+      expect(r.body).toMatchObject({
+        compagnieId: fx.compagnieId,
+        auteurRole: 'user',
+        statut: 'ouverte',
+        priorite: 'normale',
+        nbMessages: 1,
+        compagnie: { id: fx.compagnieId },
+      });
+      expect(r.body.messages).toHaveLength(1);
+    });
+
+    it("voyageur : réservation d'un autre → 403", async () => {
+      const guichet = await prisma.reservation.findFirstOrThrow({
+        where: { canal: 'guichet' },
+      });
+      await http()
+        .post('/api/v1/support/demandes')
+        .set(auth('voyageur'))
+        .send({
+          categorie: 'reservation',
+          sujet: 'Pas ma réservation',
+          message: 'test',
+          reservationId: guichet.id,
+        })
+        .expect(403);
+    });
+
+    it("admin : n'ouvre pas de demande (403) ; validation stricte (400)", async () => {
+      await http()
+        .post('/api/v1/support/demandes')
+        .set(auth('admin'))
+        .send({ categorie: 'autre', sujet: 'Sujet admin', message: 'x' })
+        .expect(403);
+      await http()
+        .post('/api/v1/support/demandes')
+        .set(auth('voyageur'))
+        .send({ categorie: 'inconnue', sujet: 'abc', message: '' })
+        .expect(400);
+    });
+
+    it('agent : demande rattachée à sa compagnie (cid)', async () => {
+      const r = await http()
+        .post('/api/v1/support/demandes')
+        .set(auth('agent'))
+        .send({
+          categorie: 'technique',
+          sujet: 'Scanner QR en panne',
+          message: "L'application ne lit plus les QR.",
+        })
+        .expect(201);
+      demandeAgent = r.body.id;
+      expect(r.body.compagnieId).toBe(fx.compagnieId);
+      expect(r.body.auteurRole).toBe('agent');
+    });
+
+    it('portée des listes : voyageur / gestionnaire / autre compagnie / admin', async () => {
+      const ids = async (role: string, qs = '') =>
+        (
+          await http()
+            .get(`/api/v1/support/demandes${qs}`)
+            .set(auth(role))
+            .expect(200)
+        ).body.map((d: any) => d.id);
+
+      expect(await ids('voyageur')).toEqual([demandeVoyageur]);
+      expect(await ids('agent')).toEqual([demandeAgent]);
+      expect(await ids('gestionnaire')).toEqual(
+        expect.arrayContaining([demandeVoyageur, demandeAgent]),
+      );
+      expect(await ids('gestionnaire', '?origine=voyageur')).toEqual([demandeVoyageur]);
+      expect(await ids('autreAgent')).toEqual([]);
+      expect(await ids('admin', `?q=%23${demandeAgent}`)).toEqual([demandeAgent]);
+      await http()
+        .get('/api/v1/support/demandes?statut=nimporte')
+        .set(auth('admin'))
+        .expect(400);
+      await http()
+        .get(`/api/v1/support/demandes/${demandeVoyageur}`)
+        .set(auth('autreAgent'))
+        .expect(404);
+    });
+
+    it('gestionnaire répond à la demande voyageur → en_cours + notification', async () => {
+      await http()
+        .post(`/api/v1/support/demandes/${demandeVoyageur}/messages`)
+        .set(auth('gestionnaire'))
+        .send({ contenu: 'Nous vérifions avec Wave.' })
+        .expect(201);
+      const d = await prisma.demandeSupport.findUniqueOrThrow({
+        where: { id: demandeVoyageur },
+      });
+      expect(d.statut).toBe('en_cours');
+      expect(d.nbMessages).toBe(2);
+      const notif = await prisma.notification.findFirst({
+        where: { utilisateurId: uid.voyageur, type: 'support.reponse' },
+      });
+      expect(notif).toBeTruthy();
+    });
+
+    it("gestionnaire ne traite pas la demande de son agent (équipe Yègo) → 403", () =>
+      http()
+        .post(`/api/v1/support/demandes/${demandeAgent}/messages`)
+        .set(auth('gestionnaire'))
+        .send({ contenu: 'Je réponds ?' })
+        .expect(403));
+
+    it("notes internes : admin seulement, invisibles pour l'auteur", async () => {
+      await http()
+        .post(`/api/v1/support/demandes/${demandeVoyageur}/messages`)
+        .set(auth('voyageur'))
+        .send({ contenu: 'note', interne: true })
+        .expect(403);
+      await http()
+        .post(`/api/v1/support/demandes/${demandeVoyageur}/messages`)
+        .set(auth('admin'))
+        .send({ contenu: 'Client déjà remboursé une fois en août.', interne: true })
+        .expect(201);
+
+      const vu = async (role: string) =>
+        (
+          await http()
+            .get(`/api/v1/support/demandes/${demandeVoyageur}`)
+            .set(auth(role))
+            .expect(200)
+        ).body;
+      const pourAuteur = await vu('voyageur');
+      expect(pourAuteur.messages.some((m: any) => m.interne)).toBe(false);
+      expect(pourAuteur.nbMessages).toBe(2); // la note ne compte pas
+      const pourAdmin = await vu('admin');
+      expect(pourAdmin.messages.some((m: any) => m.interne)).toBe(true);
+    });
+
+    it('résolue par le traitant (audit + notif) puis réouverte par la relance de l’auteur', async () => {
+      await http()
+        .patch(`/api/v1/support/demandes/${demandeVoyageur}`)
+        .set(auth('gestionnaire'))
+        .send({ statut: 'resolue', priorite: 'haute' })
+        .expect(200);
+      expect(
+        await prisma.auditLog.findFirst({
+          where: { action: 'support.statut', entiteId: demandeVoyageur },
+        }),
+      ).toBeTruthy();
+      expect(
+        await prisma.notification.findFirst({
+          where: { utilisateurId: uid.voyageur, type: 'support.statut' },
+        }),
+      ).toBeTruthy();
+
+      await http()
+        .post(`/api/v1/support/demandes/${demandeVoyageur}/messages`)
+        .set(auth('voyageur'))
+        .send({ contenu: 'Toujours pas remboursé.' })
+        .expect(201);
+      const d = await prisma.demandeSupport.findUniqueOrThrow({
+        where: { id: demandeVoyageur },
+      });
+      expect(d.statut).toBe('ouverte');
+    });
+
+    it("compteurs : dans la portée de l'appelant", async () => {
+      const r = await http()
+        .get('/api/v1/support/compteurs')
+        .set(auth('gestionnaire'))
+        .expect(200);
+      // demande voyageur ré-ouverte + demande de l'agent (ouverte)
+      expect(r.body).toEqual({ ouverte: 2, en_cours: 0 });
+    });
+
+    it("auteur : peut seulement fermer ; plus de message sur une demande fermée", async () => {
+      await http()
+        .patch(`/api/v1/support/demandes/${demandeVoyageur}`)
+        .set(auth('voyageur'))
+        .send({ priorite: 'haute' })
+        .expect(403);
+      await http()
+        .patch(`/api/v1/support/demandes/${demandeVoyageur}`)
+        .set(auth('voyageur'))
+        .send({ statut: 'resolue' })
+        .expect(403);
+      await http()
+        .patch(`/api/v1/support/demandes/${demandeVoyageur}`)
+        .set(auth('voyageur'))
+        .send({ statut: 'fermee' })
+        .expect(200);
+      await http()
+        .post(`/api/v1/support/demandes/${demandeVoyageur}/messages`)
+        .set(auth('voyageur'))
+        .send({ contenu: 'encore moi' })
+        .expect(400);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   describe('Encaissement mobile money au guichet', () => {
     it('agent enregistre un paiement Wave sur une réservation guichet', async () => {
       const resa = await http()

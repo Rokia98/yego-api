@@ -26,6 +26,7 @@ import { PaiementsModule } from './modules/paiements/paiements.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { SuiviModule } from './modules/suivi/suivi.module';
 import { DocumentsModule } from './modules/documents/documents.module';
+import { SupportModule } from './modules/support/support.module';
 
 @Module({
   imports: [
@@ -58,6 +59,7 @@ import { DocumentsModule } from './modules/documents/documents.module';
     DashboardModule,
     SuiviModule,
     DocumentsModule,
+    SupportModule,
   ],
   providers: [
     PrismaService,

@@ -37,6 +37,7 @@ model Compagnie {
   chauffeurs    Chauffeur[]
   trajets       Trajet[]
   documents     CompagnieDocument[]
+  demandesSupport DemandeSupport[]
   // Personnel rattaché à la compagnie : company_admin et agents guichet.
   utilisateurs  Utilisateur[]
 
@@ -184,6 +185,8 @@ model Utilisateur {
   auditLogs          AuditLog[]
   appareils          AppareilNotification[]
   notifications      Notification[]
+  demandesSupport    DemandeSupport[] @relation("DemandeSupportAuteur")
+  messagesSupport    MessageSupport[] @relation("MessageSupportAuteur")
 
   @@index([email])
   @@index([compagnieId])
@@ -285,6 +288,7 @@ model Reservation {
   tickets           Ticket[]
   paiement          Paiement?
   remboursement     Remboursement?
+  demandesSupport   DemandeSupport[]
 
   @@index([utilisateurId])
   @@index([agentId])
@@ -331,6 +335,58 @@ model Remboursement {
   reservation         Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
 
   @@map("remboursements")
+}
+
+// Demande d'assistance (support) : ouverte par un voyageur (app mobile) ou le
+// personnel d'une compagnie (dashboard). Traitée par l'équipe Yègo (admin) ;
+// le company_admin traite aussi les demandes voyageurs de sa compagnie.
+// compagnieId est toujours dérivé côté serveur (jamais pris du client).
+model DemandeSupport {
+  id              Int       @id @default(autoincrement())
+  auteurId        Int       @map("auteur_id")
+  auteurRole      String    @map("auteur_role")
+  compagnieId     Int?      @map("compagnie_id")
+  reservationId   Int?      @map("reservation_id")
+  // reservation | paiement | remboursement | ticket | compte | abonnement | technique | autre
+  categorie       String
+  sujet           String
+  // ouverte | en_cours | resolue | fermee
+  statut          String    @default("ouverte")
+  // normale | haute
+  priorite        String    @default("normale")
+  dateCreation    DateTime  @default(now()) @map("date_creation")
+  dateMaj         DateTime  @updatedAt @map("date_maj")
+  dernierMessageA DateTime  @default(now()) @map("dernier_message_a")
+  nbMessages      Int       @default(0) @map("nb_messages")
+
+  auteur          Utilisateur      @relation("DemandeSupportAuteur", fields: [auteurId], references: [id], onDelete: Cascade)
+  compagnie       Compagnie?       @relation(fields: [compagnieId], references: [id], onDelete: SetNull)
+  reservation     Reservation?     @relation(fields: [reservationId], references: [id], onDelete: SetNull)
+  messages        MessageSupport[]
+
+  @@index([auteurId])
+  @@index([compagnieId])
+  @@index([statut])
+  @@index([dernierMessageA])
+  @@map("demandes_support")
+}
+
+model MessageSupport {
+  id           Int       @id @default(autoincrement())
+  demandeId    Int       @map("demande_id")
+  // NULL si le compte auteur a été supprimé (le fil reste lisible).
+  auteurId     Int?      @map("auteur_id")
+  auteurRole   String    @map("auteur_role")
+  contenu      String
+  // Note interne de l'équipe Yègo : visible par l'admin uniquement.
+  interne      Boolean   @default(false)
+  dateCreation DateTime  @default(now()) @map("date_creation")
+
+  demande      DemandeSupport @relation(fields: [demandeId], references: [id], onDelete: Cascade)
+  auteur       Utilisateur?   @relation("MessageSupportAuteur", fields: [auteurId], references: [id], onDelete: SetNull)
+
+  @@index([demandeId, dateCreation])
+  @@map("messages_support")
 }
 
 // Pièce d'inscription d'une compagnie (registre de commerce, autorisation de

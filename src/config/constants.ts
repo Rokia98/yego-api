@@ -127,3 +127,22 @@ export const DASHBOARD = {
   // Série temporelle (courbes) : fenêtre bornée plus court, un point par jour.
   SERIE_MAX_JOURS: 92,
 } as const;
+
+// Support : demandes d'assistance (voyageurs + personnel des compagnies).
+export const SUPPORT = {
+  CATEGORIES: [
+    'reservation',
+    'paiement',
+    'remboursement',
+    'ticket',
+    'compte',
+    'abonnement',
+    'technique',
+    'autre',
+  ],
+  STATUTS: ['ouverte', 'en_cours', 'resolue', 'fermee'],
+  PRIORITES: ['normale', 'haute'],
+  SUJET_MIN: 5,
+  SUJET_MAX: 150,
+  MESSAGE_MAX: 4000,
+} as const;

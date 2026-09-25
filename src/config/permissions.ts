@@ -35,6 +35,9 @@ export const PERMISSIONS = {
   ABONNEMENT_READ: 'abonnement:read', // consulter celui de sa compagnie
   // Pilotage
   DASHBOARD_READ: 'dashboard:read', // statistiques (admin : toutes compagnies ; company_admin : la sienne)
+  // Support (demandes d'assistance)
+  SUPPORT_CREATE: 'support:create', // ouvrir une demande (voyageur, personnel compagnie)
+  SUPPORT_MANAGE: 'support:manage', // traiter (admin ; company_admin : demandes voyageurs de sa compagnie)
   // Administration
   UTILISATEUR_LIST: 'utilisateur:list',
   UTILISATEUR_CREATE: 'utilisateur:create',
@@ -48,7 +51,7 @@ export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
 const TOUTES = '*' as const;
 
 export const MATRICE_PERMISSIONS: Record<UserRole, Permission[] | typeof TOUTES> = {
-  [UserRole.USER]: [],
+  [UserRole.USER]: [PERMISSIONS.SUPPORT_CREATE],
 
   [UserRole.AGENT]: [
     PERMISSIONS.DEPART_MANAGE,
@@ -56,6 +59,7 @@ export const MATRICE_PERMISSIONS: Record<UserRole, Permission[] | typeof TOUTES>
     PERMISSIONS.RESERVATION_GUICHET,
     PERMISSIONS.TICKET_VALIDATE,
     PERMISSIONS.UTILISATEUR_CREATE,
+    PERMISSIONS.SUPPORT_CREATE,
   ],
 
   [UserRole.COMPANY_ADMIN]: [
@@ -72,6 +76,8 @@ export const MATRICE_PERMISSIONS: Record<UserRole, Permission[] | typeof TOUTES>
     PERMISSIONS.ABONNEMENT_READ,
     PERMISSIONS.UTILISATEUR_CREATE,
     PERMISSIONS.DASHBOARD_READ,
+    PERMISSIONS.SUPPORT_CREATE,
+    PERMISSIONS.SUPPORT_MANAGE,
   ],
 
   [UserRole.ADMIN]: TOUTES,
