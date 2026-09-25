@@ -8,12 +8,14 @@
   remboursement | ticket | compte | abonnement | technique | autre` ; statut
   `ouverte | en_cours | resolue | fermee` ; priorité `normale | haute`.
 - Perms `support:create` (user, agent, company_admin) et `support:manage`
-  (admin ; company_admin sur les demandes **voyageurs** de sa compagnie).
+  (**admin plateforme uniquement** — décision produit : le company_admin ne
+  voit ni ne traite les demandes, même celles de sa compagnie).
 - `compagnieId` dérivé côté serveur : `cid` du personnel ; compagnie du départ
   si un voyageur joint SA réservation (sinon 403) ; sinon null. Le personnel
   ne peut joindre qu'une réservation de sa compagnie.
-- Portée : voyageur / agent → leurs demandes ; company_admin → celles de sa
-  compagnie (personnel + voyageurs) ; admin → toutes. Hors portée → 404.
+- Portée : voyageur, agent et company_admin → uniquement les demandes qu'ils
+  ont ouvertes ; admin → toutes. Hors portée → 404. `compagnieId` sert au
+  filtre admin, il ne donne aucun accès.
 - Routes (JWT) : `POST /support/demandes` (throttle 5/min ; admin → 403),
   `GET /support/demandes` (`statut`, `categorie`, `origine=voyageur|compagnie`,
   `compagnieId` admin, `q` sujet/nom/#id ; tri `dernierMessageA` desc),
@@ -25,8 +27,6 @@
 - Transitions : réponse d'un traitant sur `ouverte` → `en_cours` ; relance de
   l'auteur sur `resolue` → `ouverte`. Une note interne ne change ni statut, ni
   `nbMessages`, ni `dernierMessageA`.
-- Le company_admin lit les demandes de ses agents mais ne les traite pas
-  (réservé à l'équipe Yègo) : répondre → 403.
 - Notifications `support.reponse` (réponse d'un traitant) et `support.statut`
   (passage à `resolue`) ; audit `support.statut` sur changement par un traitant.
 - +11 e2e. **145 unit + 127 e2e verts.**

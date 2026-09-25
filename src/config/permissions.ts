@@ -37,7 +37,7 @@ export const PERMISSIONS = {
   DASHBOARD_READ: 'dashboard:read', // statistiques (admin : toutes compagnies ; company_admin : la sienne)
   // Support (demandes d'assistance)
   SUPPORT_CREATE: 'support:create', // ouvrir une demande (voyageur, personnel compagnie)
-  SUPPORT_MANAGE: 'support:manage', // traiter (admin ; company_admin : demandes voyageurs de sa compagnie)
+  SUPPORT_MANAGE: 'support:manage', // voir et traiter toutes les demandes (admin plateforme uniquement)
   // Administration
   UTILISATEUR_LIST: 'utilisateur:list',
   UTILISATEUR_CREATE: 'utilisateur:create',
@@ -77,7 +77,6 @@ export const MATRICE_PERMISSIONS: Record<UserRole, Permission[] | typeof TOUTES>
     PERMISSIONS.UTILISATEUR_CREATE,
     PERMISSIONS.DASHBOARD_READ,
     PERMISSIONS.SUPPORT_CREATE,
-    PERMISSIONS.SUPPORT_MANAGE,
   ],
 
   [UserRole.ADMIN]: TOUTES,

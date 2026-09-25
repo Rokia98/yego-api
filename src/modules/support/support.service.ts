@@ -41,13 +41,10 @@ type Demande = {
 /**
  * Support : demandes d'assistance.
  *
- * Portée (lecture) : voyageur / agent → leurs demandes ; company_admin → celles
- * de sa compagnie (personnel ET voyageurs rattachés par leur réservation) ;
- * admin → toutes.
- *
- * Traitant (répondre en tant que support, changer statut/priorité) : admin
- * partout ; company_admin sur les demandes VOYAGEURS de sa compagnie. Les
- * demandes du personnel d'une compagnie sont traitées par l'équipe Yègo.
+ * Seule l'équipe Yègo (admin plateforme, perm support:manage) voit et traite
+ * les demandes. Tout autre rôle — voyageur, agent, company_admin — ne voit
+ * que les demandes qu'il a lui-même ouvertes. compagnieId reste renseigné
+ * (tri / filtre côté admin) mais ne donne aucun accès.
  */
 @Injectable()
 export class SupportService {
@@ -268,21 +265,16 @@ export class SupportService {
     return demande;
   }
 
+  // Traitant = équipe Yègo. L'auteur d'une demande n'en est jamais le traitant.
   private estTraitant(user: AuthenticatedUser, demande: Demande): boolean {
-    if (!aLaPermission(user.role, PERMISSIONS.SUPPORT_MANAGE)) return false;
-    if (user.role === UserRole.ADMIN) return true;
     return (
-      demande.auteurRole === UserRole.USER &&
-      user.compagnieId != null &&
-      demande.compagnieId === user.compagnieId
+      aLaPermission(user.role, PERMISSIONS.SUPPORT_MANAGE) &&
+      demande.auteurId !== user.userId
     );
   }
 
   private portee(user: AuthenticatedUser): Prisma.DemandeSupportWhereInput {
-    if (user.role === UserRole.ADMIN) return {};
-    if (user.role === UserRole.COMPANY_ADMIN && user.compagnieId != null) {
-      return { compagnieId: user.compagnieId };
-    }
+    if (aLaPermission(user.role, PERMISSIONS.SUPPORT_MANAGE)) return {};
     return { auteurId: user.userId };
   }
 

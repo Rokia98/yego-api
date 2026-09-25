@@ -560,9 +560,10 @@ GET /api/v1/tickets/reservation/:reservationId
 
 ### 🛟 Support (demandes d'assistance)
 
-Ouvertes par les voyageurs (app) et le personnel des compagnies (dashboard),
-traitées par l'équipe Yègo (admin) ; le company_admin traite aussi les
-demandes voyageurs de sa compagnie. Détail des règles : CHANGELOG 0.27.0.
+Ouvertes par les voyageurs (app) et le personnel des compagnies (dashboard).
+Seule l'équipe Yègo (admin plateforme) voit et traite les demandes ; chacun
+des autres rôles, company_admin compris, ne voit que les siennes. Détail des
+règles : CHANGELOG 0.27.0.
 
 ```http
 POST  /api/v1/support/demandes            { categorie, sujet, message, reservationId? }

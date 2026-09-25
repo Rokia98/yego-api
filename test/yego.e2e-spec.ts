@@ -973,7 +973,7 @@ describe('Yègo API (e2e)', () => {
       expect(r.body.auteurRole).toBe('agent');
     });
 
-    it('portée des listes : voyageur / gestionnaire / autre compagnie / admin', async () => {
+    it("portée : chacun ses demandes ; seul l'admin voit tout (pas le gestionnaire)", async () => {
       const ids = async (role: string, qs = '') =>
         (
           await http()
@@ -984,26 +984,31 @@ describe('Yègo API (e2e)', () => {
 
       expect(await ids('voyageur')).toEqual([demandeVoyageur]);
       expect(await ids('agent')).toEqual([demandeAgent]);
-      expect(await ids('gestionnaire')).toEqual(
+      // le gestionnaire de la compagnie ne voit NI la demande du voyageur
+      // rattachée à sa compagnie, NI celle de son agent
+      expect(await ids('gestionnaire')).toEqual([]);
+      expect(await ids('autreAgent')).toEqual([]);
+      expect(await ids('admin')).toEqual(
         expect.arrayContaining([demandeVoyageur, demandeAgent]),
       );
-      expect(await ids('gestionnaire', '?origine=voyageur')).toEqual([demandeVoyageur]);
-      expect(await ids('autreAgent')).toEqual([]);
+      expect(await ids('admin', '?origine=voyageur')).toEqual([demandeVoyageur]);
       expect(await ids('admin', `?q=%23${demandeAgent}`)).toEqual([demandeAgent]);
       await http()
         .get('/api/v1/support/demandes?statut=nimporte')
         .set(auth('admin'))
         .expect(400);
-      await http()
-        .get(`/api/v1/support/demandes/${demandeVoyageur}`)
-        .set(auth('autreAgent'))
-        .expect(404);
+      for (const role of ['autreAgent', 'gestionnaire']) {
+        await http()
+          .get(`/api/v1/support/demandes/${demandeVoyageur}`)
+          .set(auth(role))
+          .expect(404);
+      }
     });
 
-    it('gestionnaire répond à la demande voyageur → en_cours + notification', async () => {
+    it("l'admin répond à la demande voyageur → en_cours + notification", async () => {
       await http()
         .post(`/api/v1/support/demandes/${demandeVoyageur}/messages`)
-        .set(auth('gestionnaire'))
+        .set(auth('admin'))
         .send({ contenu: 'Nous vérifions avec Wave.' })
         .expect(201);
       const d = await prisma.demandeSupport.findUniqueOrThrow({
@@ -1017,12 +1022,20 @@ describe('Yègo API (e2e)', () => {
       expect(notif).toBeTruthy();
     });
 
-    it("gestionnaire ne traite pas la demande de son agent (équipe Yègo) → 403", () =>
-      http()
-        .post(`/api/v1/support/demandes/${demandeAgent}/messages`)
-        .set(auth('gestionnaire'))
-        .send({ contenu: 'Je réponds ?' })
-        .expect(403));
+    it('le gestionnaire ne peut ni répondre ni modifier une demande de sa compagnie → 404', async () => {
+      for (const id of [demandeVoyageur, demandeAgent]) {
+        await http()
+          .post(`/api/v1/support/demandes/${id}/messages`)
+          .set(auth('gestionnaire'))
+          .send({ contenu: 'Je réponds ?' })
+          .expect(404);
+        await http()
+          .patch(`/api/v1/support/demandes/${id}`)
+          .set(auth('gestionnaire'))
+          .send({ statut: 'resolue' })
+          .expect(404);
+      }
+    });
 
     it("notes internes : admin seulement, invisibles pour l'auteur", async () => {
       await http()
@@ -1053,7 +1066,7 @@ describe('Yègo API (e2e)', () => {
     it('résolue par le traitant (audit + notif) puis réouverte par la relance de l’auteur', async () => {
       await http()
         .patch(`/api/v1/support/demandes/${demandeVoyageur}`)
-        .set(auth('gestionnaire'))
+        .set(auth('admin'))
         .send({ statut: 'resolue', priorite: 'haute' })
         .expect(200);
       expect(
@@ -1079,12 +1092,13 @@ describe('Yègo API (e2e)', () => {
     });
 
     it("compteurs : dans la portée de l'appelant", async () => {
-      const r = await http()
-        .get('/api/v1/support/compteurs')
-        .set(auth('gestionnaire'))
-        .expect(200);
-      // demande voyageur ré-ouverte + demande de l'agent (ouverte)
-      expect(r.body).toEqual({ ouverte: 2, en_cours: 0 });
+      const compteurs = async (role: string) =>
+        (await http().get('/api/v1/support/compteurs').set(auth(role)).expect(200))
+          .body;
+      // admin : demande voyageur ré-ouverte + demande de l'agent (ouverte)
+      expect(await compteurs('admin')).toEqual({ ouverte: 2, en_cours: 0 });
+      expect(await compteurs('gestionnaire')).toEqual({ ouverte: 0, en_cours: 0 });
+      expect(await compteurs('agent')).toEqual({ ouverte: 1, en_cours: 0 });
     });
 
     it("auteur : peut seulement fermer ; plus de message sur une demande fermée", async () => {
