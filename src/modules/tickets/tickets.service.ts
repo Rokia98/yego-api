@@ -20,6 +20,7 @@ import {
   verifierTicket,
 } from '../../common/ticket-signature';
 import { AuthenticatedUser } from '../auth/strategies/jwt.strategy';
+import { ListeValidationsDto } from './dto/liste-validations.dto';
 
 export interface ActeurContexte {
   userId: number;
@@ -206,7 +207,14 @@ export class TicketsService {
 
     const ticket = await this.prisma.ticket.findUnique({
       where: { codeQr },
-      include: RESERVATION_AVEC_COMPAGNIE,
+      include: {
+        reservation: {
+          include: {
+            paiement: { select: { statut: true } },
+            depart: { include: { trajet: { select: { compagnieId: true } } } },
+          },
+        },
+      },
     });
 
     if (
@@ -253,11 +261,26 @@ export class TicketsService {
       await journaliser('annule', ticket.id);
       return { valide: false, message: 'Ticket annulé' };
     }
+    // Le ticket seul ne suffit pas : la réservation doit être toujours en
+    // vigueur (pas annulée/remboursée) et payée.
+    if (ticket.reservation.statut !== 'confirmee') {
+      await journaliser('reservation_annulee', ticket.id);
+      return { valide: false, message: 'Réservation annulée ou expirée' };
+    }
+    if (ticket.reservation.paiement?.statut !== 'paye') {
+      await journaliser('non_paye', ticket.id);
+      return { valide: false, message: 'Paiement non confirmé ou remboursé' };
+    }
 
-    await this.prisma.ticket.update({
-      where: { codeQr },
+    // Conditionnel : deux scans simultanés ne peuvent pas valider tous les deux.
+    const maj = await this.prisma.ticket.updateMany({
+      where: { id: ticket.id, statut: 'valide' },
       data: { statut: 'utilise' },
     });
+    if (maj.count === 0) {
+      await journaliser('deja_utilise', ticket.id);
+      return { valide: false, message: 'Ticket déjà utilisé' };
+    }
     await journaliser('valide', ticket.id);
     return { valide: true, message: 'Ticket validé, bon voyage' };
   }
@@ -286,8 +309,20 @@ export class TicketsService {
     user: AuthenticatedUser,
     skip = 0,
     take = 10,
+    filtres: Pick<ListeValidationsDto, 'resultat' | 'du' | 'au'> = {},
   ) {
     const where: Prisma.AuditLogWhereInput = { action: 'ticket.validation' };
+    const resultatValide = { metadata: { path: ['resultat'], equals: 'valide' } };
+    if (filtres.resultat === 'valide') Object.assign(where, resultatValide);
+    if (filtres.resultat === 'refuse') where.NOT = resultatValide;
+    if (filtres.du || filtres.au) {
+      const fin = filtres.au ? new Date(`${filtres.au}T00:00:00Z`) : null;
+      fin?.setUTCDate(fin.getUTCDate() + 1); // `au` inclus → < lendemain 00:00
+      where.dateCreation = {
+        ...(filtres.du && { gte: new Date(`${filtres.du}T00:00:00Z`) }),
+        ...(fin && { lt: fin }),
+      };
+    }
     if (user.role === UserRole.ADMIN) {
       // toutes les compagnies
     } else if (
@@ -401,8 +436,10 @@ export class TicketsService {
         reservation: {
           select: {
             id: true,
+            statut: true,
             nombrePlaces: true,
             passagerNom: true,
+            paiement: { select: { statut: true } },
             utilisateur: { select: { nom: true } },
           },
         },
@@ -427,7 +464,14 @@ export class TicketsService {
         ticketId: t.id,
         codeQr: t.codeQr,
         siege: t.siege,
-        statut: t.statut,
+        // Statut effectif pour le contrôle hors-ligne : un ticket encore
+        // 'valide' d'une réservation annulée ou non payée est révoqué.
+        statut:
+          t.statut === 'valide' &&
+          (t.reservation.statut !== 'confirmee' ||
+            t.reservation.paiement?.statut !== 'paye')
+            ? 'annule'
+            : t.statut,
         reservationId: t.reservation.id,
         passager:
           t.reservation.utilisateur?.nom ?? t.reservation.passagerNom ?? null,

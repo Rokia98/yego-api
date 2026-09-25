@@ -1,4 +1,10 @@
-import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+  BadRequestException,
+  ConflictException,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma.service';
 import {
@@ -180,10 +186,45 @@ export class PaiementsService {
 
   // Appelé uniquement par le webhook opérateur mobile money, authentifié par
   // secret partagé au niveau du contrôleur (pas par un utilisateur connecté).
+  //
+  // Ne confirme qu'un paiement en attente (ou échoué puis relancé) d'une
+  // réservation toujours en vigueur. Rejouer le webhook sur un paiement déjà
+  // payé est un no-op (idempotent) ; un paiement remboursé, ou une réservation
+  // annulée/expirée entre-temps (places peut-être revendues), donne 409 : les
+  // fonds reçus sont à rembourser, pas à transformer en voyage.
   async confirmer(reservationId: number) {
-    const paiement = await this.prisma.paiement.update({
+    const existant = await this.prisma.paiement.findUnique({
       where: { reservationId },
+      include: { reservation: true },
+    });
+    if (!existant) throw new NotFoundException('Paiement introuvable');
+    if (existant.statut === 'paye') return existant;
+    if (existant.statut === 'rembourse') {
+      throw new ConflictException('Ce paiement a déjà été remboursé');
+    }
+    if (existant.reservation.statut !== 'confirmee') {
+      throw new ConflictException(
+        'Réservation annulée ou expirée : paiement non appliqué, à rembourser',
+      );
+    }
+
+    // Conditionnel : si le cron d'expiration ou une annulation passe entre la
+    // lecture et l'écriture, rien n'est modifié.
+    const maj = await this.prisma.paiement.updateMany({
+      where: {
+        reservationId,
+        statut: { in: ['en_attente', 'echoue'] },
+        reservation: { statut: 'confirmee' },
+      },
       data: { statut: 'paye', datePaiement: new Date() },
+    });
+    if (maj.count === 0) {
+      throw new ConflictException(
+        'Le paiement ou la réservation a changé d’état, confirmation refusée',
+      );
+    }
+    const paiement = await this.prisma.paiement.findUniqueOrThrow({
+      where: { reservationId },
       include: { reservation: true },
     });
 
@@ -229,6 +270,9 @@ export class PaiementsService {
     }
     if (paiement.statut === 'rembourse') {
       throw new BadRequestException('Ce paiement a été remboursé');
+    }
+    if (paiement.reservation.statut !== 'confirmee') {
+      throw new BadRequestException('Cette réservation est annulée ou expirée');
     }
 
     if (resultat === 'succes') {

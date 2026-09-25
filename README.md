@@ -560,7 +560,12 @@ GET /api/v1/tickets/reservation/:reservationId
 
 ### 💰 Remboursements
 
-#### Demander un remboursement
+#### Obtenir un remboursement (voyageur)
+Le voyageur annule sa réservation : `PATCH /api/v1/reservations/:id/annuler`
+crée la demande de remboursement avec les frais du barème. Impossible une fois
+le départ parti ou un ticket utilisé à l'embarquement.
+
+#### Remboursement manuel (gestionnaire / admin)
 ```http
 POST /api/v1/remboursements
 Authorization: Bearer <token>
@@ -568,10 +573,13 @@ Content-Type: application/json
 
 {
   "reservationId": 1,
-  "montantRembourse": 30000,
   "fraisRetenus": 1500
 }
 ```
+Perm `remboursement:confirm` (company_admin de la compagnie ou admin), sur une
+réservation **déjà annulée** et payée, sans remboursement existant (ex. geste
+commercial quand le barème ne remboursait rien). `montantRembourse` est
+toujours calculé par le serveur (montant payé − frais).
 
 #### Lister les remboursements
 ```http

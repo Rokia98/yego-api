@@ -9,9 +9,11 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma.service';
 import { AuditService } from '../audit/audit.service';
 import {
+  DepartStatut,
   FRAIS_ANNULATION,
   FRAIS_ANNULATION_DEPART_PASSE,
   ReservationStatut,
+  TicketStatut,
   UserRole,
 } from '../../config/constants';
 import { assertCompagnieScope, peutVoirRessourceVoyageur } from '../../common/scope';
@@ -22,6 +24,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { AuthenticatedUser } from '../auth/strategies/jwt.strategy';
 import { CreateReservationDto } from './dto/create-reservation.dto';
 import { CreateReservationGuichetDto } from './dto/create-reservation-guichet.dto';
+import { ListeReservationsDto } from './dto/liste-reservations.dto';
 
 // Champs sûrs à exposer : on ne renvoie jamais motDePasseHash / etc.
 const UTILISATEUR_SAFE_SELECT = {
@@ -32,6 +35,20 @@ const UTILISATEUR_SAFE_SELECT = {
   role: true,
   dateCreation: true,
 };
+
+// Ce qu'il faut pour décider si un départ est ouvert à la vente.
+const DEPART_VENTE_SELECT = {
+  statut: true,
+  dateDepart: true,
+  trajet: { select: { statut: true, compagnieId: true, heureDepart: true } },
+};
+
+// Instant de départ = date du départ (UTC) + heure du trajet.
+function instantDepart(dateDepart: Date, heureDepart: Date): Date {
+  const d = new Date(dateDepart);
+  d.setUTCHours(heureDepart.getUTCHours(), heureDepart.getUTCMinutes(), 0, 0);
+  return d;
+}
 
 const RESERVATION_INCLUDE = {
   depart: {
@@ -58,12 +75,10 @@ export class ReservationsService {
   async create(dto: CreateReservationDto, utilisateurId: number) {
     const departInfo = await this.prisma.depart.findUnique({
       where: { id: dto.departId },
-      select: { statut: true, trajet: { select: { statut: true, compagnieId: true } } },
+      select: DEPART_VENTE_SELECT,
     });
     if (!departInfo) throw new NotFoundException('Départ introuvable');
-    if (departInfo.statut !== 'planifie' || departInfo.trajet.statut !== 'actif') {
-      throw new BadRequestException("Ce départ n'est pas ouvert à la réservation");
-    }
+    this.assertOuvertALaVente(departInfo);
     await assertCompagnieOperationnelle(this.prisma, departInfo.trajet.compagnieId);
 
     const reservation = await this.prisma.$transaction(async (tx) => {
@@ -115,10 +130,11 @@ export class ReservationsService {
   async creerAuGuichet(dto: CreateReservationGuichetDto, agent: AuthenticatedUser) {
     const departInfo = await this.prisma.depart.findUnique({
       where: { id: dto.departId },
-      select: { trajet: { select: { compagnieId: true } } },
+      select: DEPART_VENTE_SELECT,
     });
     if (!departInfo) throw new NotFoundException('Départ introuvable');
     assertCompagnieScope(agent, departInfo.trajet.compagnieId);
+    this.assertOuvertALaVente(departInfo);
     await assertCompagnieOperationnelle(this.prisma, departInfo.trajet.compagnieId);
 
     const resultat = await this.prisma.$transaction(async (tx) => {
@@ -194,10 +210,10 @@ export class ReservationsService {
 
   // Liste cloisonnée : voyageur -> ses réservations ; agent / company_admin ->
   // celles de leur compagnie ; admin plateforme -> toutes.
-  findAllScoped(user: AuthenticatedUser, skip = 0, take = 10) {
+  findAllScoped(user: AuthenticatedUser, filtres: ListeReservationsDto = {}) {
     return this.prisma.reservation.findMany({
-      where: this.filtrePortee(user),
-      ...paginer(skip, take),
+      where: { AND: [this.filtrePortee(user), ...this.filtresListe(user, filtres)] },
+      ...paginer(filtres.skip, filtres.take),
       include: RESERVATION_INCLUDE,
       orderBy: { dateReservation: 'desc' },
     });
@@ -225,6 +241,7 @@ export class ReservationsService {
         include: {
           paiement: true,
           remboursement: true,
+          tickets: { select: { statut: true } },
           depart: {
             include: { trajet: { select: { compagnieId: true, heureDepart: true } } },
           },
@@ -242,6 +259,26 @@ export class ReservationsService {
       if (reservation.statut === ReservationStatut.EXPIREE) {
         throw new BadRequestException('Réservation expirée (non payée à temps)');
       }
+      // Voyage consommé (ou en cours) : ni annulation ni remboursement.
+      if (
+        reservation.depart.statut === DepartStatut.EN_ROUTE ||
+        reservation.depart.statut === DepartStatut.ARRIVE
+      ) {
+        throw new BadRequestException(
+          'Ce départ est déjà parti : la réservation ne peut plus être annulée',
+        );
+      }
+      if (reservation.tickets.some((t) => t.statut === TicketStatut.UTILISE)) {
+        throw new BadRequestException(
+          'Un ticket de cette réservation a déjà été utilisé à l\'embarquement',
+        );
+      }
+
+      // Les tickets émis ne doivent plus permettre d'embarquer.
+      await tx.ticket.updateMany({
+        where: { reservationId: id, statut: TicketStatut.VALIDE },
+        data: { statut: TicketStatut.ANNULE },
+      });
 
       await tx.depart.update({
         where: { id: reservation.departId },
@@ -334,15 +371,27 @@ export class ReservationsService {
     return sieges;
   }
 
+  // Vente (en ligne ou guichet) : départ planifié, trajet actif, et pas encore
+  // parti (date + heure de départ dans le futur).
+  private assertOuvertALaVente(depart: {
+    statut: string;
+    dateDepart: Date;
+    trajet: { statut: string; heureDepart: Date };
+  }): void {
+    if (depart.statut !== DepartStatut.PLANIFIE || depart.trajet.statut !== 'actif') {
+      throw new BadRequestException("Ce départ n'est pas ouvert à la réservation");
+    }
+    if (
+      instantDepart(depart.dateDepart, depart.trajet.heureDepart).getTime() <=
+      Date.now()
+    ) {
+      throw new BadRequestException('Ce départ est déjà parti');
+    }
+  }
+
   // Fraction du montant retenue en frais selon le nombre de jours avant le départ.
   private fractionFrais(dateDepart: Date, heureDepart: Date): number {
-    const depart = new Date(dateDepart);
-    depart.setUTCHours(
-      heureDepart.getUTCHours(),
-      heureDepart.getUTCMinutes(),
-      0,
-      0,
-    );
+    const depart = instantDepart(dateDepart, heureDepart);
     const maintenant = new Date();
     if (depart.getTime() <= maintenant.getTime()) {
       return FRAIS_ANNULATION_DEPART_PASSE;
@@ -356,6 +405,60 @@ export class ReservationsService {
 
   count() {
     return this.prisma.reservation.count();
+  }
+
+  // Filtres de liste, ajoutés EN PLUS du cloisonnement (jamais à sa place).
+  private filtresListe(
+    user: AuthenticatedUser,
+    f: ListeReservationsDto,
+  ): Prisma.ReservationWhereInput[] {
+    const where: Prisma.ReservationWhereInput[] = [];
+    if (f.statut) where.push({ statut: f.statut });
+    if (f.canal) where.push({ canal: f.canal });
+    if (f.paiement === 'paye') where.push({ paiement: { is: { statut: 'paye' } } });
+    if (f.paiement === 'non_paye') {
+      where.push({
+        OR: [{ paiement: { is: null } }, { paiement: { statut: { not: 'paye' } } }],
+      });
+    }
+    if (f.du || f.au) {
+      where.push({
+        depart: {
+          dateDepart: {
+            ...(f.du && { gte: new Date(`${f.du}T00:00:00Z`) }),
+            ...(f.au && { lte: new Date(`${f.au}T00:00:00Z`) }),
+          },
+        },
+      });
+    }
+    if (f.reserveDu || f.reserveAu) {
+      // dateReservation est un horodatage : `reserveAu` inclus → < lendemain 00:00.
+      const fin = f.reserveAu ? new Date(`${f.reserveAu}T00:00:00Z`) : null;
+      fin?.setUTCDate(fin.getUTCDate() + 1);
+      where.push({
+        dateReservation: {
+          ...(f.reserveDu && { gte: new Date(`${f.reserveDu}T00:00:00Z`) }),
+          ...(fin && { lt: fin }),
+        },
+      });
+    }
+    if (f.departId) where.push({ departId: f.departId });
+    if (f.compagnieId && user.role === UserRole.ADMIN) {
+      where.push({ depart: { trajet: { compagnieId: f.compagnieId } } });
+    }
+    if (f.q) {
+      const texte = { contains: f.q, mode: 'insensitive' as const };
+      const ou: Prisma.ReservationWhereInput[] = [
+        { passagerNom: texte },
+        { passagerTelephone: { contains: f.q } },
+        { utilisateur: { nom: texte } },
+        { utilisateur: { telephone: { contains: f.q } } },
+      ];
+      const id = /^#?(\d{1,9})$/.exec(f.q);
+      if (id) ou.push({ id: Number(id[1]) });
+      where.push({ OR: ou });
+    }
+    return where;
   }
 
   private filtrePortee(user: AuthenticatedUser): Prisma.ReservationWhereInput {

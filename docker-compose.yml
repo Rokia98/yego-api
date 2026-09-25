@@ -27,7 +27,9 @@ services:
       db:
         condition: service_healthy
     environment:
-      NODE_ENV: production
+      # production par défaut ; un .env de dev peut passer development pour
+      # autoriser PAYMENT_SIMULATION / SEED_ON_START (refusés en production).
+      NODE_ENV: ${NODE_ENV:-production}
       PORT: 3000
       # Communication inter-conteneurs : Postgres écoute toujours sur 5432 côté réseau Docker.
       DATABASE_URL: postgresql://${POSTGRES_USER:-yego}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-yego}?schema=public

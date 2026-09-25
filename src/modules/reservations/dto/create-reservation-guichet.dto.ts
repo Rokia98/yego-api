@@ -9,6 +9,7 @@ import {
   IsPositive,
   IsString,
   Matches,
+  Max,
   MaxLength,
   Min,
   MinLength,
@@ -39,6 +40,8 @@ export class CreateReservationGuichetDto {
 
   @IsInt()
   @Min(1)
+  // Aligné sur la limite de sièges choisis (ArrayMaxSize(10)).
+  @Max(10)
   nombrePlaces: number;
 
   @ValidateNested()

@@ -18,6 +18,7 @@ import { AuthenticatedUser } from '../auth/strategies/jwt.strategy';
 import { ReservationsService } from './reservations.service';
 import { CreateReservationDto } from './dto/create-reservation.dto';
 import { CreateReservationGuichetDto } from './dto/create-reservation-guichet.dto';
+import { ListeReservationsDto } from './dto/liste-reservations.dto';
 
 @Controller('reservations')
 @UseGuards(JwtAuthGuard)
@@ -47,13 +48,13 @@ export class ReservationsController {
 
   // Voyageur : ses réservations. Agent / company_admin : celles de leur
   // compagnie. Admin : toutes.
+  // Filtres optionnels : voir ListeReservationsDto.
   @Get()
   findAll(
     @CurrentUser() user: AuthenticatedUser,
-    @Query('skip') skip = 0,
-    @Query('take') take = 10,
+    @Query() filtres: ListeReservationsDto,
   ) {
-    return this.reservationsService.findAllScoped(user, Number(skip), Number(take));
+    return this.reservationsService.findAllScoped(user, filtres);
   }
 
   @Get(':id')

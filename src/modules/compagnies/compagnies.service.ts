@@ -9,7 +9,7 @@ import { PrismaService } from '../../prisma.service';
 import { assertCompagnieScope } from '../../common/scope';
 import { paginer } from '../../common/pagination';
 import { genererMotDePasse } from '../../common/motdepasse';
-import { UserRole } from '../../config/constants';
+import { ROLES_LIES_COMPAGNIE, UserRole } from '../../config/constants';
 import { AuthenticatedUser } from '../auth/strategies/jwt.strategy';
 import { CreateCompagnieDto } from './dto/create-compagnie.dto';
 import { UpdateCompagnieDto } from './dto/update-compagnie.dto';
@@ -20,11 +20,22 @@ const BCRYPT_ROUNDS = 12;
 
 // Pas d'abonnements ici : infos de facturation réservées à /abonnements
 // (admin / company_admin). GET /compagnies est public.
+// Ni téléphone ni numéro de permis des chauffeurs (données personnelles) :
+// le détail passe par /chauffeurs, réservé au personnel de la compagnie.
 const INCLUDE_COMPLET = {
   vehicules: true,
-  chauffeurs: true,
+  chauffeurs: { select: { id: true, nom: true } },
   trajets: true,
 };
+
+// Gestionnaire(s) de la compagnie. Le numéro (qui sert aussi d'identifiant de
+// connexion) n'est inclus que pour le personnel habilité — voir findOne.
+const gestionnaires = (avecTelephone: boolean) => ({
+  utilisateurs: {
+    where: { role: 'company_admin' },
+    select: { id: true, nom: true, telephone: avecTelephone },
+  },
+});
 
 @Injectable()
 export class CompagniesService {
@@ -34,7 +45,7 @@ export class CompagniesService {
   create(dto: CreateCompagnieDto) {
     return this.prisma.compagnie.create({
       data: { ...dto, statut: 'en_attente' },
-      include: { ...INCLUDE_COMPLET, utilisateurs: { where: { role: 'company_admin' }, select: { id: true, nom: true, telephone: true } } },
+      include: { ...INCLUDE_COMPLET, ...gestionnaires(true) },
     });
   }
 
@@ -45,10 +56,17 @@ export class CompagniesService {
     });
   }
 
-  async findOne(id: number) {
+  // `user` : appelant identifié (optionnel, route publique). Admin plateforme
+  // ou personnel de cette compagnie → téléphone du gestionnaire inclus.
+  async findOne(id: number, user?: AuthenticatedUser | null) {
+    const habilite =
+      user?.role === UserRole.ADMIN ||
+      (user != null &&
+        ROLES_LIES_COMPAGNIE.includes(user.role) &&
+        user.compagnieId === id);
     const compagnie = await this.prisma.compagnie.findUnique({
       where: { id },
-      include: { ...INCLUDE_COMPLET, utilisateurs: { where: { role: 'company_admin' }, select: { id: true, nom: true, telephone: true } } },
+      include: { ...INCLUDE_COMPLET, ...gestionnaires(habilite) },
     });
 
     if (!compagnie) throw new NotFoundException('Compagnie introuvable');

@@ -123,6 +123,8 @@ describe('TicketsService.valider — cloisonnement par compagnie', () => {
     id: 42,
     statut: 'valide',
     reservation: {
+      statut: 'confirmee',
+      paiement: { statut: 'paye' },
       depart: { trajet: { compagnieId: 1 } },
     },
   };
@@ -132,7 +134,7 @@ describe('TicketsService.valider — cloisonnement par compagnie', () => {
     prisma = {
       ticket: {
         findUnique: jest.fn().mockResolvedValue(ticketCompagnie1),
-        update: jest.fn().mockResolvedValue({}),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
     };
     service = new TicketsService(prisma, audit as never);
@@ -147,7 +149,7 @@ describe('TicketsService.valider — cloisonnement par compagnie', () => {
       }),
     ).rejects.toBeInstanceOf(ForbiddenException);
 
-    expect(prisma.ticket.update).not.toHaveBeenCalled();
+    expect(prisma.ticket.updateMany).not.toHaveBeenCalled();
     expect(audit.record).toHaveBeenCalledWith(
       expect.objectContaining({
         action: 'ticket.validation',
@@ -165,7 +167,10 @@ describe('TicketsService.valider — cloisonnement par compagnie', () => {
       compagnieId: 1,
     });
     expect(res.valide).toBe(true);
-    expect(prisma.ticket.update).toHaveBeenCalled();
+    expect(prisma.ticket.updateMany).toHaveBeenCalledWith({
+      where: { id: 42, statut: 'valide' },
+      data: { statut: 'utilise' },
+    });
   });
 
   it("l'admin plateforme n'est jamais bloqué par le cloisonnement", async () => {
@@ -180,5 +185,62 @@ describe('TicketsService.valider — cloisonnement par compagnie', () => {
   it('sans contexte (ctx absent), pas de vérification de portée', async () => {
     const res = await service.valider('un-code-qr');
     expect(res.valide).toBe(true);
+  });
+});
+
+describe('TicketsService.valider — réservation et paiement', () => {
+  let prisma: any;
+  let audit: { record: jest.Mock };
+  let service: TicketsService;
+
+  const ticket = (reservation: Record<string, unknown>) => ({
+    id: 42,
+    statut: 'valide',
+    reservation: {
+      statut: 'confirmee',
+      paiement: { statut: 'paye' },
+      depart: { trajet: { compagnieId: 1 } },
+      ...reservation,
+    },
+  });
+  const agent = { userId: 5, role: UserRole.AGENT, compagnieId: 1 };
+
+  beforeEach(() => {
+    audit = { record: jest.fn() };
+    prisma = {
+      ticket: {
+        findUnique: jest.fn(),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+    };
+    service = new TicketsService(prisma, audit as never);
+  });
+
+  it("refuse le ticket d'une réservation annulée (même si le ticket est resté 'valide')", async () => {
+    prisma.ticket.findUnique.mockResolvedValue(ticket({ statut: 'annulee' }));
+    const res = await service.valider('qr', agent);
+    expect(res.valide).toBe(false);
+    expect(prisma.ticket.updateMany).not.toHaveBeenCalled();
+    expect(audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ resultat: 'reservation_annulee' }),
+      }),
+    );
+  });
+
+  it('refuse le ticket si le paiement a été remboursé', async () => {
+    prisma.ticket.findUnique.mockResolvedValue(
+      ticket({ paiement: { statut: 'rembourse' } }),
+    );
+    const res = await service.valider('qr', agent);
+    expect(res.valide).toBe(false);
+    expect(prisma.ticket.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('scan concurrent : si le ticket a été utilisé entre-temps → déjà utilisé', async () => {
+    prisma.ticket.findUnique.mockResolvedValue(ticket({}));
+    prisma.ticket.updateMany.mockResolvedValue({ count: 0 });
+    const res = await service.valider('qr', agent);
+    expect(res).toEqual({ valide: false, message: 'Ticket déjà utilisé' });
   });
 });

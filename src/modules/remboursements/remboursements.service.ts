@@ -86,15 +86,12 @@ export class RemboursementsService {
     });
 
     if (!reservation) throw new NotFoundException('Réservation introuvable');
-    if (
-      !peutVoirRessourceVoyageur(
-        user,
-        reservation.utilisateurId,
-        reservation.depart.trajet.compagnieId,
-      )
-    ) {
-      throw new ForbiddenException(
-        "Vous ne pouvez pas demander de remboursement pour cette réservation",
+    assertCompagnieScope(user, reservation.depart.trajet.compagnieId);
+    // Rembourser une réservation encore valide = rembourser un voyage que le
+    // passager peut toujours faire : on exige l'annulation au préalable.
+    if (reservation.statut !== 'annulee') {
+      throw new BadRequestException(
+        "Annulez d'abord la réservation (PATCH /reservations/:id/annuler)",
       );
     }
     if (!reservation.paiement || reservation.paiement.statut !== 'paye') {
@@ -112,8 +109,8 @@ export class RemboursementsService {
       );
     }
 
-    const fraisRetenus = dto.fraisRetenus || 0;
-    if (fraisRetenus > reservation.paiement.montant.toNumber()) {
+    const fraisRetenus = new Prisma.Decimal(dto.fraisRetenus ?? 0);
+    if (fraisRetenus.greaterThan(reservation.paiement.montant)) {
       throw new BadRequestException(
         'Les frais retenus ne peuvent pas dépasser le montant payé',
       );
@@ -161,6 +158,11 @@ export class RemboursementsService {
     );
     if (remboursement.statut === 'rembourse') {
       throw new BadRequestException('Ce remboursement est déjà confirmé');
+    }
+    if (remboursement.reservation.statut !== 'annulee') {
+      throw new BadRequestException(
+        "La réservation n'est pas annulée : rien à rembourser",
+      );
     }
 
     // Décaissement effectué : on marque aussi le paiement d'origine comme remboursé.

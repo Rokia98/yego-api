@@ -77,6 +77,12 @@ export class EnvironmentVariables {
   @IsIn(['true', 'false'])
   PAYMENT_SIMULATION?: string;
 
+  // Seed au démarrage du conteneur (comptes de démo aux mots de passe publics,
+  // cf. README). Interdit en production — voir validate().
+  @IsOptional()
+  @IsIn(['true', 'false'])
+  SEED_ON_START?: string;
+
   // Clé privée Ed25519 (PEM PKCS#8) qui signe les QR des tickets pour la
   // validation hors-ligne. Optionnelle : sans elle, une paire éphémère est
   // générée au démarrage (dev). À définir en production.
@@ -148,6 +154,21 @@ export function validate(config: Record<string, unknown>) {
     throw new Error(
       'En production, CORS_ORIGIN doit lister explicitement les origines autorisées (jamais "*").',
     );
+  }
+
+  // Deux flags de dev qui, en production, reviennent à ouvrir la caisse :
+  // paiements confirmables sans transaction, comptes aux mots de passe connus.
+  if (validated.NODE_ENV === Environnement.Production) {
+    if (validated.PAYMENT_SIMULATION === 'true') {
+      throw new Error(
+        'PAYMENT_SIMULATION=true est interdit en production (paiements confirmables sans transaction réelle).',
+      );
+    }
+    if (validated.SEED_ON_START === 'true') {
+      throw new Error(
+        'SEED_ON_START=true est interdit en production (comptes de démonstration aux mots de passe publics).',
+      );
+    }
   }
 
   return validated;

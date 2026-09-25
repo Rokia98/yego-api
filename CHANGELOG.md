@@ -1,5 +1,64 @@
 # Changelog - Yègo API
 
+## [0.26.0] - 2026-09-24
+
+### 🔒 Correctifs de sécurité (audit — failles critiques)
+- **Remboursement sans annulation** : `POST /remboursements` acceptait du
+  voyageur un `fraisRetenus` libre (0) sur une réservation toujours valide →
+  remboursement intégral + voyage. Désormais perm `remboursement:confirm`
+  (gestionnaire de la compagnie / admin) et réservation **annulée** requise ;
+  le voyageur passe par `PATCH /reservations/:id/annuler` (barème).
+  `PATCH /remboursements/:id/confirmer` refuse aussi une réservation non
+  annulée (demandes frauduleuses éventuellement déjà en base).
+- **Ticket valide après annulation** : l'annulation passe les tickets
+  `valide` → `annule`, et est refusée si un ticket a déjà servi ou si le départ
+  est `en_route`/`arrive`. `POST /tickets/valider` vérifie en plus réservation
+  `confirmee` + paiement `paye` (résultats audit `reservation_annulee`,
+  `non_paye`) et passe à `utilise` de façon conditionnelle (deux scans
+  simultanés ne valident plus tous les deux). Le manifeste hors-ligne marque
+  `annule` les tickets de réservations annulées / non payées.
+- **Données personnelles publiques** : `GET /departs/:id` ne renvoie plus les
+  réservations (noms/téléphones des passagers) ; chauffeur réduit à `{id, nom}`
+  sur `GET /departs(/:id)` et `GET /compagnies(/:id)` (plus de téléphone ni de
+  permis). `GET /compagnies/:id` ne donne le téléphone du gestionnaire qu'à
+  l'admin ou au personnel de la compagnie (`OptionalJwtAuthGuard`).
+- **Webhook de paiement** : `confirmer` ne s'applique qu'à un paiement
+  `en_attente`/`echoue` d'une réservation `confirmee` (écriture
+  conditionnelle). Rejoué sur un paiement payé → no-op (pas de 2e notif) ;
+  paiement remboursé ou réservation annulée/expirée → 409. `simuler` refuse
+  une réservation annulée/expirée. Le cron d'expiration revérifie le paiement
+  au moment d'écrire.
+- **Configuration** : `PAYMENT_SIMULATION=true` et `SEED_ON_START=true`
+  refusés au boot avec `NODE_ENV=production` (et le seed refuse aussi, script
+  et entrypoint). `docker-compose` : `NODE_ENV: ${NODE_ENV:-production}` (le
+  `.env` de dev peut passer `development`).
+- ⚠️ **Contrat** : `POST /remboursements` n'est plus accessible au voyageur ;
+  `GET /departs/:id` n'a plus `reservations` ; chauffeurs publics sans
+  `telephone`/`numeroPermis`.
+
+### 🎫 Vente au guichet sur un départ fermé (signalé par yego-dashboard)
+- `POST /reservations/guichet` ne vérifiait que `placesDisponibles` : vente
+  possible sur un départ annulé, en route, arrivé, déjà parti ou d'un trajet
+  inactif. Contrôle commun en ligne + guichet (`assertOuvertALaVente`) :
+  départ `planifie`, trajet `actif`, date + heure de départ dans le futur
+  (la vente en ligne refuse désormais aussi un départ du jour déjà parti).
+- `nombrePlaces` ≤ 10 (`@Max(10)`), aligné sur `sieges` (`ArrayMaxSize(10)`),
+  sur les deux DTO de réservation.
+
+### 🔎 Filtres serveur des listes (demande yego-dashboard)
+- `GET /reservations` : `statut`, `canal`, `paiement=paye|non_paye`,
+  `du`/`au` (YYYY-MM-DD, sur `depart.dateDepart`), `departId`, `q` (nom /
+  téléphone passager ou compte, `#id`), `reserveDu`/`reserveAu` (YYYY-MM-DD,
+  sur `dateReservation`, bornes incluses), `compagnieId` (admin seulement,
+  ignoré sinon). Toujours à l'intérieur du cloisonnement ; tri inchangé
+  (`dateReservation` desc).
+- `GET /departs` : `statut`, `du`/`au`, `trajetId`, `ordre=asc|desc` (défaut
+  asc ; tri date puis heure).
+- `GET /tickets/validations` : `resultat=valide|refuse` (refuse = tout sauf
+  valide), `du`/`au` (date du scan, UTC).
+- Paramètres validés par DTO : valeur invalide ou paramètre inconnu → 400.
+- +19 unit, +22 e2e. **145 unit + 116 e2e verts.**
+
 ## [0.25.1] - 2026-09-11
 
 ### 🔒 Vérification : cloisonnement inter-compagnies de la validation de ticket

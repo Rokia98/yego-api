@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PaiementsService } from './paiements.service';
 
@@ -97,5 +97,76 @@ describe('PaiementsService.create (relance idempotente)', () => {
     await expect(service.create(dto, VOYAGEUR_ID)).rejects.toBeInstanceOf(
       BadRequestException,
     );
+  });
+});
+
+describe('PaiementsService.confirmer (webhook opérateur)', () => {
+  let prisma: any;
+  let notifier: jest.Mock;
+  let service: PaiementsService;
+
+  const paiement = (statut: string, reservationStatut = 'confirmee') => ({
+    id: 10,
+    reservationId: 1,
+    statut,
+    reservation: { id: 1, utilisateurId: VOYAGEUR_ID, statut: reservationStatut },
+  });
+
+  beforeEach(() => {
+    notifier = jest.fn();
+    prisma = {
+      paiement: {
+        findUnique: jest.fn(),
+        findUniqueOrThrow: jest.fn().mockResolvedValue(paiement('paye')),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+    };
+    service = new PaiementsService(
+      prisma,
+      { record: jest.fn() } as never,
+      { notifier } as never,
+    );
+  });
+
+  it('confirme un paiement en attente, de façon conditionnelle', async () => {
+    prisma.paiement.findUnique.mockResolvedValue(paiement('en_attente'));
+    const res = await service.confirmer(1);
+    expect(res.statut).toBe('paye');
+    expect(prisma.paiement.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          reservationId: 1,
+          statut: { in: ['en_attente', 'echoue'] },
+          reservation: { statut: 'confirmee' },
+        },
+      }),
+    );
+    expect(notifier).toHaveBeenCalledTimes(1);
+  });
+
+  it('webhook rejoué sur un paiement déjà payé : no-op, pas de 2e notification', async () => {
+    prisma.paiement.findUnique.mockResolvedValue(paiement('paye'));
+    await service.confirmer(1);
+    expect(prisma.paiement.updateMany).not.toHaveBeenCalled();
+    expect(notifier).not.toHaveBeenCalled();
+  });
+
+  it('refuse (409) de repasser un paiement remboursé en "paye"', async () => {
+    prisma.paiement.findUnique.mockResolvedValue(paiement('rembourse', 'annulee'));
+    await expect(service.confirmer(1)).rejects.toBeInstanceOf(ConflictException);
+    expect(prisma.paiement.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('refuse (409) pour une réservation expirée (places peut-être revendues)', async () => {
+    prisma.paiement.findUnique.mockResolvedValue(paiement('en_attente', 'expiree'));
+    await expect(service.confirmer(1)).rejects.toBeInstanceOf(ConflictException);
+    expect(prisma.paiement.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("refuse (409) si l'état a changé entre la lecture et l'écriture", async () => {
+    prisma.paiement.findUnique.mockResolvedValue(paiement('en_attente'));
+    prisma.paiement.updateMany.mockResolvedValue({ count: 0 });
+    await expect(service.confirmer(1)).rejects.toBeInstanceOf(ConflictException);
+    expect(notifier).not.toHaveBeenCalled();
   });
 });

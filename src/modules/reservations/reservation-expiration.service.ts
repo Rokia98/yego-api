@@ -42,8 +42,17 @@ export class ReservationExpirationService {
       const applique = await this.prisma.$transaction(async (tx) => {
         // updateMany conditionnel : ne fait rien si un autre process a déjà
         // changé le statut entre-temps (idempotent, safe multi-instance).
+        // Le paiement est re-vérifié ici : un webhook arrivé depuis le
+        // findMany ne doit pas voir sa réservation expirer.
         const maj = await tx.reservation.updateMany({
-          where: { id: r.id, statut: ReservationStatut.CONFIRMEE },
+          where: {
+            id: r.id,
+            statut: ReservationStatut.CONFIRMEE,
+            OR: [
+              { paiement: { is: null } },
+              { paiement: { statut: { not: 'paye' } } },
+            ],
+          },
           data: { statut: ReservationStatut.EXPIREE },
         });
         if (maj.count === 0) return false;

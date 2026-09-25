@@ -276,12 +276,24 @@ describe('Yègo API (e2e)', () => {
       // le compte a bien été créé, rattaché à la compagnie, rôle gestionnaire
       const gestionnaires = await http()
         .get(`/api/v1/compagnies/${compagnieId}`)
+        .set(auth('admin'))
         .expect(200);
       expect(gestionnaires.body.utilisateurs).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ telephone: '+2250788001122' }),
         ]),
       );
+
+      // en anonyme (route publique) : le gestionnaire est nommé, sans numéro
+      const publique = await http()
+        .get(`/api/v1/compagnies/${compagnieId}`)
+        .expect(200);
+      expect(publique.body.utilisateurs).toEqual(
+        expect.arrayContaining([expect.objectContaining({ nom: 'Gérant Test' })]),
+      );
+      for (const g of publique.body.utilisateurs) {
+        expect(g.telephone).toBeUndefined();
+      }
 
       // mot de passe généré par un tiers -> flag de changement obligatoire posé
       const u = await prisma.utilisateur.findUnique({
@@ -520,7 +532,37 @@ describe('Yègo API (e2e)', () => {
         .expect(201)
         .then((r) => expect(r.body.valide).toBe(true)));
 
-    it('annulation → remboursement automatique créé', async () => {
+    it('passager déjà embarqué : annulation refusée (pas de voyage + remboursement) → 400', async () => {
+      await http()
+        .patch(`/api/v1/reservations/${reservationId}/annuler`)
+        .set(auth('agent'))
+        .expect(400);
+      const resa = await prisma.reservation.findUnique({
+        where: { id: reservationId },
+        include: { remboursement: true },
+      });
+      expect(resa?.statut).toBe('confirmee');
+      expect(resa?.remboursement).toBeNull();
+    });
+
+    it('annulation avant embarquement → remboursement créé ET ticket révoqué', async () => {
+      const vente = await http()
+        .post('/api/v1/reservations/guichet')
+        .set(auth('agent'))
+        .send({
+          departId: fx.departFuturId,
+          nombrePlaces: 1,
+          passager: { nom: 'Kone Ibrahim' },
+          paiementEspece: true,
+        })
+        .expect(201);
+      reservationId = vente.body.id;
+      const ticket = await http()
+        .post(`/api/v1/tickets/reservation/${reservationId}`)
+        .set(auth('agent'))
+        .send({})
+        .expect(201);
+
       const r = await http()
         .patch(`/api/v1/reservations/${reservationId}/annuler`)
         .set(auth('agent'))
@@ -528,6 +570,13 @@ describe('Yègo API (e2e)', () => {
       expect(r.body.statut).toBe('annulee');
       expect(r.body.remboursement).toBeTruthy();
       expect(Number(r.body.remboursement.fraisRetenus)).toBeGreaterThan(0);
+
+      // le QR de la réservation annulée ne fait plus embarquer
+      const scan = await http()
+        .post(`/api/v1/tickets/valider/${ticket.body.codeQr}`)
+        .set(auth('agent'))
+        .expect(201);
+      expect(scan.body.valide).toBe(false);
     });
 
     it('GET /remboursements/statut/en_attente : réservation enrichie (voyageur + trajet)', () =>
@@ -549,6 +598,302 @@ describe('Yègo API (e2e)', () => {
             remb.reservation.utilisateur ?? remb.reservation.passagerNom,
           ).toBeTruthy();
         }));
+  });
+
+  // ---------------------------------------------------------------------------
+  describe('Failles critiques (non-régression)', () => {
+    const webhook = () => ({
+      'x-webhook-secret': process.env.PAYMENT_WEBHOOK_SECRET as string,
+    });
+
+    // Réservation en ligne du voyageur, paiement initié (en_attente).
+    const reserverEtInitierPaiement = async () => {
+      const resa = await http()
+        .post('/api/v1/reservations')
+        .set(auth('voyageur'))
+        .send({ departId: fx.departFuturId, nombrePlaces: 1 })
+        .expect(201);
+      await http()
+        .post('/api/v1/paiements')
+        .set(auth('voyageur'))
+        .send({ reservationId: resa.body.id, moyenPaiement: 'wave' })
+        .expect(201);
+      return resa.body.id as number;
+    };
+
+    it('POST /remboursements : interdit au voyageur (403)', async () => {
+      const id = await reserverEtInitierPaiement();
+      await http()
+        .post(`/api/v1/paiements/reservation/${id}/simuler`)
+        .set(auth('voyageur'))
+        .send({ resultat: 'succes' })
+        .expect(201);
+      await http()
+        .post('/api/v1/remboursements')
+        .set(auth('voyageur'))
+        .send({ reservationId: id, fraisRetenus: 0 })
+        .expect(403);
+    });
+
+    it('POST /remboursements : refusé sur une réservation non annulée, même par le gestionnaire (400)', async () => {
+      const id = await reserverEtInitierPaiement();
+      await http()
+        .post(`/api/v1/paiements/reservation/${id}/simuler`)
+        .set(auth('voyageur'))
+        .send({ resultat: 'succes' })
+        .expect(201);
+      await http()
+        .post('/api/v1/remboursements')
+        .set(auth('gestionnaire'))
+        .send({ reservationId: id, fraisRetenus: 0 })
+        .expect(400);
+    });
+
+    it('webhook confirmer : réservation annulée entre-temps → 409, paiement inchangé', async () => {
+      const id = await reserverEtInitierPaiement();
+      await http()
+        .patch(`/api/v1/reservations/${id}/annuler`)
+        .set(auth('voyageur'))
+        .expect(200);
+      await http()
+        .patch(`/api/v1/paiements/reservation/${id}/confirmer`)
+        .set(webhook())
+        .expect(409);
+      const p = await prisma.paiement.findUnique({ where: { reservationId: id } });
+      expect(p?.statut).toBe('en_attente');
+    });
+
+    it('webhook confirmer rejoué sur un paiement payé : idempotent (200)', async () => {
+      const id = await reserverEtInitierPaiement();
+      await http()
+        .patch(`/api/v1/paiements/reservation/${id}/confirmer`)
+        .set(webhook())
+        .expect(200);
+      const r = await http()
+        .patch(`/api/v1/paiements/reservation/${id}/confirmer`)
+        .set(webhook())
+        .expect(200);
+      expect(r.body.statut).toBe('paye');
+    });
+
+    it('simuler sur une réservation annulée → 400', async () => {
+      const id = await reserverEtInitierPaiement();
+      await http()
+        .patch(`/api/v1/reservations/${id}/annuler`)
+        .set(auth('voyageur'))
+        .expect(200);
+      await http()
+        .post(`/api/v1/paiements/reservation/${id}/simuler`)
+        .set(auth('voyageur'))
+        .send({ resultat: 'succes' })
+        .expect(400);
+    });
+
+    it('routes publiques : ni passagers ni données personnelles du chauffeur', async () => {
+      const chauffeur = await prisma.chauffeur.create({
+        data: {
+          compagnieId: fx.compagnieId,
+          nom: 'Chauffeur Test',
+          telephone: '+2250701010101',
+          numeroPermis: 'CI-PERMIS-123',
+        },
+      });
+      await prisma.depart.update({
+        where: { id: fx.departFuturId },
+        data: { chauffeurId: chauffeur.id },
+      });
+
+      const d = await http().get(`/api/v1/departs/${fx.departFuturId}`).expect(200);
+      expect(d.body.reservations).toBeUndefined();
+      expect(d.body.chauffeur).toEqual({ id: chauffeur.id, nom: 'Chauffeur Test' });
+
+      const liste = await http().get('/api/v1/departs?take=100').expect(200);
+      for (const dep of liste.body) {
+        if (dep.chauffeur) expect(dep.chauffeur.telephone).toBeUndefined();
+      }
+
+      const c = await http().get(`/api/v1/compagnies/${fx.compagnieId}`).expect(200);
+      expect(c.body.chauffeurs).toEqual(
+        expect.arrayContaining([{ id: chauffeur.id, nom: 'Chauffeur Test' }]),
+      );
+      const toutes = await http().get('/api/v1/compagnies?take=100').expect(200);
+      for (const comp of toutes.body) {
+        for (const ch of comp.chauffeurs) {
+          expect(ch.telephone).toBeUndefined();
+          expect(ch.numeroPermis).toBeUndefined();
+        }
+      }
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  describe('Vente sur un départ fermé', () => {
+    it('guichet : départ déjà parti (hier) → 400', () =>
+      http()
+        .post('/api/v1/reservations/guichet')
+        .set(auth('agent'))
+        .send({ departId: fx.departId, nombrePlaces: 1, passager: { nom: 'Tard Venu' } })
+        .expect(400));
+
+    it('en ligne : départ déjà parti (hier) → 400', () =>
+      http()
+        .post('/api/v1/reservations')
+        .set(auth('voyageur'))
+        .send({ departId: fx.departId, nombrePlaces: 1 })
+        .expect(400));
+
+    it('guichet : départ annulé → 400', async () => {
+      const dans2Mois = new Date();
+      dans2Mois.setMonth(dans2Mois.getMonth() + 2);
+      const annule = await prisma.depart.create({
+        data: {
+          trajetId: fx.trajetId,
+          dateDepart: dans2Mois,
+          placesTotales: 50,
+          placesDisponibles: 50,
+          statut: 'annule',
+        },
+      });
+      await http()
+        .post('/api/v1/reservations/guichet')
+        .set(auth('agent'))
+        .send({ departId: annule.id, nombrePlaces: 1, passager: { nom: 'Kouame' } })
+        .expect(400);
+    });
+
+    it('nombrePlaces > 10 → 400 (aligné sur la limite de sièges)', () =>
+      http()
+        .post('/api/v1/reservations/guichet')
+        .set(auth('agent'))
+        .send({ departId: fx.departFuturId, nombrePlaces: 11, passager: { nom: 'Groupe' } })
+        .expect(400));
+  });
+
+  // ---------------------------------------------------------------------------
+  describe('Filtres serveur des listes', () => {
+    it('GET /reservations?canal=guichet&statut=annulee', async () => {
+      const r = await http()
+        .get('/api/v1/reservations?canal=guichet&statut=annulee&take=100')
+        .set(auth('gestionnaire'))
+        .expect(200);
+      expect(r.body.length).toBeGreaterThan(0);
+      for (const x of r.body) {
+        expect(x.canal).toBe('guichet');
+        expect(x.statut).toBe('annulee');
+      }
+    });
+
+    it('GET /reservations?paiement=non_paye : aucune réservation payée', async () => {
+      const r = await http()
+        .get('/api/v1/reservations?paiement=non_paye&take=100')
+        .set(auth('gestionnaire'))
+        .expect(200);
+      expect(r.body.length).toBeGreaterThan(0);
+      for (const x of r.body) expect(x.paiement?.statut).not.toBe('paye');
+    });
+
+    it('GET /reservations?q= : par nom de passager, puis par #id', async () => {
+      const parNom = await http()
+        .get('/api/v1/reservations?q=awa%20cis&take=100')
+        .set(auth('gestionnaire'))
+        .expect(200);
+      expect(parNom.body.length).toBeGreaterThan(0);
+      for (const x of parNom.body) expect(x.passagerNom).toBe('Awa Cisse');
+
+      const id = parNom.body[0].id;
+      const parId = await http()
+        .get(`/api/v1/reservations?q=%23${id}`)
+        .set(auth('gestionnaire'))
+        .expect(200);
+      expect(parId.body.map((x: any) => x.id)).toEqual([id]);
+    });
+
+    it('GET /reservations?du&au : bornes sur la date du départ', async () => {
+      const d = await prisma.depart.findUniqueOrThrow({ where: { id: fx.departFuturId } });
+      const jour = d.dateDepart.toISOString().slice(0, 10);
+      const r = await http()
+        .get(`/api/v1/reservations?du=${jour}&au=${jour}&take=100`)
+        .set(auth('gestionnaire'))
+        .expect(200);
+      expect(r.body.length).toBeGreaterThan(0);
+      for (const x of r.body) expect(x.departId).toBe(fx.departFuturId);
+    });
+
+    it('GET /reservations?reserveDu&reserveAu : date de réservation (aujourd’hui / demain)', async () => {
+      const auj = new Date().toISOString().slice(0, 10);
+      const demain = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+      const r = await http()
+        .get(`/api/v1/reservations?reserveDu=${auj}&reserveAu=${auj}&take=100`)
+        .set(auth('gestionnaire'))
+        .expect(200);
+      expect(r.body.length).toBeGreaterThan(0);
+      for (const x of r.body) expect(x.dateReservation.slice(0, 10)).toBe(auj);
+      // tri inchangé : dateReservation desc
+      const dates = r.body.map((x: any) => x.dateReservation);
+      expect(dates).toEqual([...dates].sort().reverse());
+
+      const vide = await http()
+        .get(`/api/v1/reservations?reserveDu=${demain}`)
+        .set(auth('gestionnaire'))
+        .expect(200);
+      expect(vide.body).toEqual([]);
+    });
+
+    it("GET /reservations?compagnieId= n'élargit pas le cloisonnement du voyageur", async () => {
+      const r = await http()
+        .get(`/api/v1/reservations?compagnieId=${fx.autreCompagnieId}&take=100`)
+        .set(auth('voyageur'))
+        .expect(200);
+      for (const x of r.body) expect(x.utilisateurId).toBe(uid.voyageur);
+    });
+
+    it('GET /reservations : filtre invalide → 400', () =>
+      http()
+        .get('/api/v1/reservations?du=24-09-2026')
+        .set(auth('gestionnaire'))
+        .expect(400));
+
+    it('GET /departs?ordre=desc : les plus récents en premier', async () => {
+      const r = await http().get('/api/v1/departs?ordre=desc&take=100').expect(200);
+      const dates = r.body.map((d: any) => d.dateDepart);
+      expect(dates).toEqual([...dates].sort().reverse());
+    });
+
+    it('GET /departs?statut=annule&trajetId=', async () => {
+      const r = await http()
+        .get(`/api/v1/departs?statut=annule&trajetId=${fx.trajetId}`)
+        .expect(200);
+      expect(r.body.length).toBeGreaterThan(0);
+      for (const d of r.body) {
+        expect(d.statut).toBe('annule');
+        expect(d.trajetId).toBe(fx.trajetId);
+      }
+    });
+
+    it('GET /tickets/validations?resultat=valide|refuse', async () => {
+      const ok = await http()
+        .get('/api/v1/tickets/validations?resultat=valide&take=100')
+        .set(auth('admin'))
+        .expect(200);
+      expect(ok.body.length).toBeGreaterThan(0);
+      for (const v of ok.body) expect(v.resultat).toBe('valide');
+
+      const ko = await http()
+        .get('/api/v1/tickets/validations?resultat=refuse&take=100')
+        .set(auth('admin'))
+        .expect(200);
+      expect(ko.body.length).toBeGreaterThan(0);
+      for (const v of ko.body) expect(v.resultat).not.toBe('valide');
+    });
+
+    it("GET /tickets/validations?du=demain : rien (bornes sur la date du scan)", async () => {
+      const demain = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+      const r = await http()
+        .get(`/api/v1/tickets/validations?du=${demain}`)
+        .set(auth('admin'))
+        .expect(200);
+      expect(r.body).toEqual([]);
+    });
   });
 
   // ---------------------------------------------------------------------------

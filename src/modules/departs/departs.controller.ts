@@ -20,22 +20,16 @@ import { DepartsService } from './departs.service';
 import { CreateDepartDto } from './dto/create-depart.dto';
 import { UpdateDepartDto } from './dto/update-depart.dto';
 import { RechercheDepartDto } from './dto/recherche-depart.dto';
+import { ListeDepartsDto } from './dto/liste-departs.dto';
 
 @Controller('departs')
 export class DepartsController {
   constructor(private departsService: DepartsService) {}
 
+  // Filtres optionnels : voir ListeDepartsDto.
   @Get()
-  findAll(
-    @Query('skip') skip = 0,
-    @Query('take') take = 10,
-    @Query('compagnieId') compagnieId?: string,
-  ) {
-    return this.departsService.findAll(
-      Number(skip),
-      Number(take),
-      compagnieId != null ? Number(compagnieId) : undefined,
-    );
+  findAll(@Query() filtres: ListeDepartsDto) {
+    return this.departsService.findAll(filtres);
   }
 
   // Route spécifique déclarée AVANT ':id' pour ne pas être interceptée par elle.

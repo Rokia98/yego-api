@@ -16,6 +16,12 @@ const unAnPlusTard = () => {
 };
 
 async function main() {
+  // Comptes de démonstration aux mots de passe publiés dans le README :
+  // jamais sur une base de production.
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('Seed refusé : NODE_ENV=production (comptes de démo aux mots de passe publics).');
+  }
+
   // Idempotent : si la base contient déjà des données, on ne fait rien.
   // Pour repartir de zéro : `npx prisma migrate reset` ou `docker compose down -v`.
   if ((await prisma.compagnie.count()) > 0) {

@@ -27,6 +27,17 @@ describe('ReservationsService.creerAuGuichet', () => {
     trajet: { compagnieId: 1, prix: new Prisma.Decimal(15000) },
   };
 
+  // Départ vendable : planifié, trajet actif, dans 5 jours.
+  const departOuvert = {
+    statut: 'planifie',
+    dateDepart: new Date(Date.now() + 5 * 86_400_000),
+    trajet: {
+      compagnieId: 1,
+      statut: 'actif',
+      heureDepart: new Date('1970-01-01T08:00:00Z'),
+    },
+  };
+
   beforeEach(() => {
     tx = {
       depart: {
@@ -43,7 +54,7 @@ describe('ReservationsService.creerAuGuichet', () => {
     prisma = {
       $transaction: jest.fn((cb: any) => cb(tx)),
       depart: {
-        findUnique: jest.fn().mockResolvedValue({ trajet: { compagnieId: 1 } }),
+        findUnique: jest.fn().mockResolvedValue(departOuvert),
       },
       // compagnie opérationnelle : statut actif + 1 abonnement valide
       compagnie: {
@@ -130,6 +141,20 @@ describe('ReservationsService.creerAuGuichet', () => {
     ).rejects.toBeInstanceOf(ConflictException);
     expect(tx.reservation.create).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ['annulé', { statut: 'annule' }],
+    ['en route', { statut: 'en_route' }],
+    ['arrivé', { statut: 'arrive' }],
+    ['déjà parti (hier)', { dateDepart: new Date(Date.now() - 86_400_000) }],
+    ['sur un trajet inactif', { trajet: { ...departOuvert.trajet, statut: 'inactif' } }],
+  ])('refuse la vente sur un départ %s (400)', async (_cas, surcharge) => {
+    prisma.depart.findUnique.mockResolvedValue({ ...departOuvert, ...surcharge });
+    await expect(service.creerAuGuichet(dto, agent(1))).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(tx.reservation.create).not.toHaveBeenCalled();
+  });
 });
 
 describe('ReservationsService.annuler', () => {
@@ -150,7 +175,9 @@ describe('ReservationsService.annuler', () => {
           utilisateurId: 42,
           paiement: { statut: 'paye', montant: new Prisma.Decimal(30000) },
           remboursement: null,
+          tickets: [{ statut: 'valide' }],
           depart: {
+            statut: 'planifie',
             dateDepart: dans10Jours,
             trajet: {
               compagnieId: 1,
@@ -161,6 +188,7 @@ describe('ReservationsService.annuler', () => {
         update: jest.fn().mockResolvedValue({ id: 5, statut: 'annulee' }),
       },
       depart: { update: jest.fn().mockResolvedValue({}) },
+      ticket: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
       remboursement: {
         create: jest
           .fn()
@@ -193,5 +221,45 @@ describe('ReservationsService.annuler', () => {
     expect(rb.fraisRetenus.toString()).toBe('3000'); // 10 % de 30000
     expect(rb.montantRembourse.toString()).toBe('27000');
     expect(res.remboursement).toBeTruthy();
+  });
+
+  const voyageur: AuthenticatedUser = {
+    userId: 42,
+    telephone: '+225',
+    role: UserRole.USER,
+    compagnieId: null,
+  };
+
+  it("annule les tickets encore valides : ils ne permettent plus d'embarquer", async () => {
+    await service.annuler(5, voyageur);
+    expect(tx.ticket.updateMany).toHaveBeenCalledWith({
+      where: { reservationId: 5, statut: 'valide' },
+      data: { statut: 'annule' },
+    });
+  });
+
+  it('refuse (400) si un ticket a déjà servi à embarquer — pas de remboursement', async () => {
+    const resa = await tx.reservation.findUnique();
+    tx.reservation.findUnique.mockResolvedValue({
+      ...resa,
+      tickets: [{ statut: 'utilise' }],
+    });
+    await expect(service.annuler(5, voyageur)).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(tx.remboursement.create).not.toHaveBeenCalled();
+    expect(tx.depart.update).not.toHaveBeenCalled();
+  });
+
+  it('refuse (400) si le départ est déjà en route', async () => {
+    const resa = await tx.reservation.findUnique();
+    tx.reservation.findUnique.mockResolvedValue({
+      ...resa,
+      depart: { ...resa.depart, statut: 'en_route' },
+    });
+    await expect(service.annuler(5, voyageur)).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(tx.remboursement.create).not.toHaveBeenCalled();
   });
 });

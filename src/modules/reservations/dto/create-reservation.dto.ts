@@ -6,6 +6,7 @@ import {
   IsOptional,
   IsPositive,
   Matches,
+  Max,
   Min,
 } from 'class-validator';
 import { SIEGE_REGEX } from '../../../common/sieges';
@@ -17,6 +18,8 @@ export class CreateReservationDto {
 
   @IsInt()
   @Min(1)
+  // Aligné sur la limite de sièges choisis (ArrayMaxSize(10)).
+  @Max(10)
   nombrePlaces: number;
 
   // Sièges souhaités (un par place), choisis AVANT le paiement. Optionnel :

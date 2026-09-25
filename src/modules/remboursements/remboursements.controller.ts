@@ -24,6 +24,11 @@ import { CreateRemboursementDto } from './dto/create-remboursement.dto';
 export class RemboursementsController {
   constructor(private remboursementsService: RemboursementsService) {}
 
+  // Remboursement manuel (geste commercial, frais fixés par la compagnie) :
+  // gestionnaire de la compagnie ou admin, sur une réservation déjà annulée.
+  // Le voyageur, lui, passe par PATCH /reservations/:id/annuler (barème).
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.REMBOURSEMENT_CONFIRM)
   @Post()
   create(
     @CurrentUser() user: AuthenticatedUser,

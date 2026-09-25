@@ -56,4 +56,28 @@ describe('validate (env)', () => {
       validate({ ...base, PAYMENT_SIMULATION: 'true' }),
     ).not.toThrow();
   });
+
+  const prod = {
+    ...base,
+    NODE_ENV: 'production',
+    CORS_ORIGIN: 'https://app.yego.ci',
+  };
+
+  it('rejette PAYMENT_SIMULATION=true en production', () => {
+    expect(() => validate({ ...prod, PAYMENT_SIMULATION: 'true' })).toThrow(
+      /PAYMENT_SIMULATION/,
+    );
+  });
+
+  it('rejette SEED_ON_START=true en production', () => {
+    expect(() => validate({ ...prod, SEED_ON_START: 'true' })).toThrow(
+      /SEED_ON_START/,
+    );
+  });
+
+  it('accepte les deux flags à false en production', () => {
+    expect(() =>
+      validate({ ...prod, PAYMENT_SIMULATION: 'false', SEED_ON_START: 'false' }),
+    ).not.toThrow();
+  });
 });

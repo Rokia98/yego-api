@@ -11,6 +11,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { OptionalJwtAuthGuard } from '../../common/guards/optional-jwt-auth.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { PERMISSIONS } from '../../config/permissions';
@@ -41,9 +42,15 @@ export class CompagniesController {
     return this.compagniesService.findByStatut(statut, skip, take);
   }
 
+  // Public ; le téléphone du gestionnaire n'est renvoyé qu'à l'admin
+  // plateforme ou au personnel de CETTE compagnie.
+  @UseGuards(OptionalJwtAuthGuard)
   @Get(':id')
-  findOne(@Param('id', ParseIntPipe) id: number) {
-    return this.compagniesService.findOne(id);
+  findOne(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: AuthenticatedUser | null,
+  ) {
+    return this.compagniesService.findOne(id, user);
   }
 
   @UseGuards(JwtAuthGuard, PermissionsGuard)

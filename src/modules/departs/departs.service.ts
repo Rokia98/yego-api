@@ -17,11 +17,21 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { AuthenticatedUser } from '../auth/strategies/jwt.strategy';
 import { CreateDepartDto } from './dto/create-depart.dto';
 import { UpdateDepartDto } from './dto/update-depart.dto';
+import { ListeDepartsDto } from './dto/liste-departs.dto';
 
 const INCLUDE_COMPLET = {
   trajet: { include: { compagnie: true, villeDepart: true, villeArrivee: true } },
   vehicule: true,
   chauffeur: true,
+};
+
+// Routes publiques (GET /departs, GET /departs/:id) : jamais de données
+// personnelles — ni passagers (voir /reservations, cloisonné), ni téléphone /
+// permis du chauffeur (voir /chauffeurs, réservé au personnel).
+const INCLUDE_PUBLIC = {
+  trajet: { include: { compagnie: true, villeDepart: true, villeArrivee: true } },
+  vehicule: true,
+  chauffeur: { select: { id: true, nom: true } },
 };
 
 @Injectable()
@@ -54,22 +64,30 @@ export class DepartsService {
     });
   }
 
-  findAll(skip = 0, take = 10, compagnieId?: number) {
+  findAll(f: ListeDepartsDto = {}) {
+    const ordre = f.ordre ?? 'asc';
     return this.prisma.depart.findMany({
-      where:
-        compagnieId != null && !Number.isNaN(compagnieId)
-          ? { trajet: { compagnieId } }
-          : undefined,
-      ...paginer(skip, take),
-      include: INCLUDE_COMPLET,
-      orderBy: { dateDepart: 'asc' },
+      where: {
+        ...(f.compagnieId && { trajet: { compagnieId: f.compagnieId } }),
+        ...(f.trajetId && { trajetId: f.trajetId }),
+        ...(f.statut && { statut: f.statut }),
+        ...((f.du || f.au) && {
+          dateDepart: {
+            ...(f.du && { gte: new Date(`${f.du}T00:00:00Z`) }),
+            ...(f.au && { lte: new Date(`${f.au}T00:00:00Z`) }),
+          },
+        }),
+      },
+      ...paginer(f.skip, f.take),
+      include: INCLUDE_PUBLIC,
+      orderBy: [{ dateDepart: ordre }, { trajet: { heureDepart: ordre } }, { id: ordre }],
     });
   }
 
   async findOne(id: number) {
     const depart = await this.prisma.depart.findUnique({
       where: { id },
-      include: { ...INCLUDE_COMPLET, reservations: true },
+      include: INCLUDE_PUBLIC,
     });
 
     if (!depart) {

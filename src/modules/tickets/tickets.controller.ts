@@ -19,6 +19,7 @@ import { AuthenticatedUser } from '../auth/strategies/jwt.strategy';
 import { TicketsService } from './tickets.service';
 import { GenererTicketDto } from './dto/generer-ticket.dto';
 import { SyncValidationsDto } from './dto/sync-validations.dto';
+import { ListeValidationsDto } from './dto/liste-validations.dto';
 
 @Controller('tickets')
 export class TicketsController {
@@ -58,13 +59,13 @@ export class TicketsController {
   @Get('validations')
   historiqueValidations(
     @CurrentUser() user: AuthenticatedUser,
-    @Query('skip') skip = 0,
-    @Query('take') take = 10,
+    @Query() filtres: ListeValidationsDto,
   ) {
     return this.ticketsService.historiqueValidations(
       user,
-      Number(skip),
-      Number(take),
+      filtres.skip,
+      filtres.take,
+      filtres,
     );
   }
 
