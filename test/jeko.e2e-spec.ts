@@ -513,6 +513,16 @@ describe('Intégration Jèko (e2e)', () => {
       });
     };
 
+    it('sans compte renseigné : coordonnees = { moyen: null, telephone: null }', async () => {
+      const apercu = await http().get('/api/v1/reversements/apercu').set(auth('gestionnaire')).expect(200);
+      expect(apercu.body.coordonnees).toEqual({ moyen: null, telephone: null });
+      const coord = await http()
+        .get(`/api/v1/reversements/coordonnees/${fx.compagnieId}`)
+        .set(auth('gestionnaire'))
+        .expect(200);
+      expect(coord.body).toEqual({ moyen: null, telephone: null });
+    });
+
     it('le gestionnaire renseigne son compte Mobile Money ; un agent ne peut pas', async () => {
       await http()
         .put(`/api/v1/reversements/coordonnees/${fx.compagnieId}`)

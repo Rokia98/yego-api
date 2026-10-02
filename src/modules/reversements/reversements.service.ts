@@ -75,7 +75,7 @@ export class ReversementsService {
     });
     return {
       compagnieId,
-      coordonnees: this.coordonneesDe(compagnie),
+      coordonnees: this.coordonneesDe(compagnie) ?? { moyen: null, telephone: null },
       nombrePaiements: lot.paiementIds.length,
       montantBrut: lot.montantBrut,
       commissionPourcent: this.commissionPourcent(),
