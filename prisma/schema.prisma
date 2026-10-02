@@ -319,7 +319,12 @@ model Ticket {
 model Paiement {
   id                     Int         @id @default(autoincrement())
   reservationId          Int         @unique @map("reservation_id")
+  // Prix des billets (part de la compagnie : base des remboursements et des
+  // reversements).
   montant                Decimal     @db.Decimal(10, 2)
+  // Frais de service Yègo payés en plus par le voyageur sur un achat en ligne
+  // (FRAIS_SERVICE_POURCENT). Ni remboursés ni reversés. 0 au guichet.
+  fraisService           Decimal     @default(0) @map("frais_service") @db.Decimal(10, 2)
   moyenPaiement          String      @map("moyen_paiement")
   referenceTransaction   String?     @map("reference_transaction")
   statut                 String      @default("en_attente")

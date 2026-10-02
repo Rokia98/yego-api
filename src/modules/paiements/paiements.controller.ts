@@ -40,6 +40,14 @@ export class PaiementsController {
     return this.paiementsService.findAllScoped(user, Number(skip), Number(take));
   }
 
+  // Taux des frais de service ajoutés aux achats en ligne, pour afficher le
+  // total (billets + frais) avant le paiement.
+  @UseGuards(JwtAuthGuard)
+  @Get('frais-service')
+  fraisService() {
+    return { pourcent: this.paiementsService.fraisServicePourcent() };
+  }
+
   // Route spécifique déclarée AVANT ':id' pour ne pas être interceptée par elle.
   @UseGuards(JwtAuthGuard)
   @Get('reservation/:reservationId')

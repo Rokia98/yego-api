@@ -30,6 +30,8 @@ import {
   versMoyenJeko,
 } from '../../common/moyens-paiement';
 import { normaliserTelephone } from '../../common/telephone';
+import { calculerFraisService } from '../../common/frais-service';
+import { ConfigService } from '@nestjs/config';
 import { CreatePaiementDto } from './dto/create-paiement.dto';
 import { CreatePaiementGuichetDto } from './dto/create-paiement-guichet.dto';
 import { UpdatePaiementDto } from './dto/update-paiement.dto';
@@ -60,7 +62,13 @@ export class PaiementsService {
     private audit: AuditService,
     private notifications: NotificationsService,
     private jeko: JekoService,
+    private config: ConfigService,
   ) {}
+
+  // Frais de service appliqués aux achats en ligne (FRAIS_SERVICE_POURCENT).
+  fraisServicePourcent(): number {
+    return Number(this.config.get('FRAIS_SERVICE_POURCENT') ?? 5);
+  }
 
   // Si Jèko est configuré (JEKO_API_KEY), un paiement mobile money ouvre une
   // demande de paiement direct opérateur ; la confirmation arrive ensuite par
@@ -94,7 +102,10 @@ export class PaiementsService {
       throw new BadRequestException('Cette réservation est annulée ou expirée');
     }
 
+    // montant = prix des billets (part compagnie) ; fraisService = frais Yègo
+    // payés en plus. Le voyageur règle montant + fraisService.
     const montant = reservation.depart.trajet.prix.times(reservation.nombrePlaces);
+    const fraisService = calculerFraisService(montant, this.fraisServicePourcent());
 
     const existant = reservation.paiement;
     if (existant) {
@@ -110,6 +121,7 @@ export class PaiementsService {
       return this.initierPaiementJeko(
         dto,
         montant,
+        fraisService,
         existant,
         reservation.utilisateur?.telephone,
       );
@@ -121,6 +133,7 @@ export class PaiementsService {
         where: { reservationId: dto.reservationId },
         data: {
           montant,
+          fraisService,
           moyenPaiement: dto.moyenPaiement,
           referenceTransaction: dto.referenceTransaction ?? null,
           statut: 'en_attente',
@@ -133,6 +146,7 @@ export class PaiementsService {
       data: {
         reservationId: dto.reservationId,
         montant,
+        fraisService,
         moyenPaiement: dto.moyenPaiement,
         referenceTransaction: dto.referenceTransaction,
         statut: 'en_attente',
@@ -148,9 +162,12 @@ export class PaiementsService {
   private async initierPaiementJeko(
     dto: CreatePaiementDto,
     montant: Prisma.Decimal,
+    fraisService: Prisma.Decimal,
     existant: {
       id: number;
       statut: string;
+      montant: Prisma.Decimal;
+      fraisService: Prisma.Decimal;
       moyenPaiement: string;
       telephonePayeur: string | null;
       urlPaiement: string | null;
@@ -180,7 +197,9 @@ export class PaiementsService {
       existant.jekoDemandeLe &&
       Date.now() - existant.jekoDemandeLe.getTime() < DEMANDE_JEKO_VALIDE_MS &&
       existant.moyenPaiement === dto.moyenPaiement &&
-      existant.telephonePayeur === telephone
+      existant.telephonePayeur === telephone &&
+      // Montant inchangé (ex. frais de service modifiés depuis la demande).
+      existant.montant.plus(existant.fraisService).equals(montant.plus(fraisService))
     ) {
       const enCours = await this.prisma.paiement.findUniqueOrThrow({
         where: { id: existant.id },
@@ -191,6 +210,7 @@ export class PaiementsService {
 
     const donnees = {
       montant,
+      fraisService,
       moyenPaiement: dto.moyenPaiement,
       telephonePayeur: telephone,
       referenceTransaction: null,
@@ -211,7 +231,7 @@ export class PaiementsService {
     try {
       demande = await this.jeko.creerDemandePaiement({
         reference,
-        montantFcfa: montant.toNumber(),
+        montantFcfa: montant.plus(fraisService).toNumber(),
         moyen: moyenJeko,
         telephonePayeur: telephone,
         reservationId: dto.reservationId,
@@ -404,19 +424,21 @@ export class PaiementsService {
 
     // Jèko exprime les montants en centimes ; on tolère aussi des FCFA pour ne
     // pas bloquer les confirmations si le format du webhook évolue.
+    // Le voyageur a payé billets + frais de service.
+    const totalFcfa = paiement.montant.plus(paiement.fraisService).toNumber();
     if (
       tx.montantCentimes != null &&
-      tx.montantCentimes !== versCentimes(paiement.montant.toNumber()) &&
-      tx.montantCentimes !== paiement.montant.toNumber()
+      tx.montantCentimes !== versCentimes(totalFcfa) &&
+      tx.montantCentimes !== totalFcfa
     ) {
       this.logger.error(
-        `Webhook Jèko : montant ${tx.montantCentimes} incohérent pour le paiement ${paiement.id} (${paiement.montant} FCFA)`,
+        `Webhook Jèko : montant ${tx.montantCentimes} incohérent pour le paiement ${paiement.id} (${totalFcfa} FCFA)`,
       );
       await this.audit.record({
         action: 'paiement.jeko_montant_incoherent',
         entite: 'paiement',
         entiteId: paiement.id,
-        metadata: { ...tx, montantAttendu: paiement.montant.toString() },
+        metadata: { ...tx, montantAttendu: String(totalFcfa) },
       });
       return null;
     }

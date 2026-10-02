@@ -207,12 +207,15 @@ describe('Intégration Jèko (e2e)', () => {
         telephonePayeur: '+2250701020304',
       });
       expect(res.body.urlPaiement).toMatch(/^https:\/\/webpay\.orange\.ci\//);
+      expect(Number(res.body.montant)).toBe(30000);
+      expect(Number(res.body.fraisService)).toBe(1500);
 
       const appel = dernierAppel('POST', '/partner_api/payment_requests')!;
       expect(appel.entetes['x-api-key-id']).toBe('id-cle-e2e');
       expect(appel.corps).toMatchObject({
         storeId: 'store-e2e',
-        amountCents: 2 * 15000 * 100,
+        // 2 billets à 15 000 F + 5 % de frais de service = 31 500 F.
+        amountCents: 31_500 * 100,
         currency: 'XOF',
         reference: referenceT1,
         paymentDetails: {
@@ -261,12 +264,25 @@ describe('Intégration Jèko (e2e)', () => {
       await http()
         .post('/api/v1/jeko/webhook')
         .set('Jeko-Event', 'TRANSACTION_COMPLETED')
-        .send(paiementReussi(referenceT1, 3_000_000))
+        .send(paiementReussi(referenceT1, 3_150_000))
         .expect(401);
-      await webhook(paiementReussi(referenceT1, 3_000_000), { signature: 'ab'.repeat(32) }).expect(401);
+      await webhook(paiementReussi(referenceT1, 3_150_000), { signature: 'ab'.repeat(32) }).expect(401);
       const p = await prisma.paiement.findUniqueOrThrow({ where: { id: paiementId } });
       expect(p.statut).toBe('en_attente');
     });
+
+    it('le webhook au prix SANS les frais est refusé (le voyageur doit payer les frais)', async () => {
+      await webhook(paiementReussi(referenceT1, 3_000_000)).expect(200);
+      const p = await prisma.paiement.findUniqueOrThrow({ where: { id: paiementId } });
+      expect(p.statut).toBe('en_attente');
+    });
+
+    it('GET /paiements/frais-service → 5 %', () =>
+      http()
+        .get('/api/v1/paiements/frais-service')
+        .set(auth('voyageur'))
+        .expect(200)
+        .then((r) => expect(r.body).toEqual({ pourcent: 5 })));
 
     it('webhook au mauvais montant → ignoré (200) et audité', async () => {
       await webhook(paiementReussi(referenceT1, 100)).expect(200);
@@ -274,11 +290,11 @@ describe('Intégration Jèko (e2e)', () => {
       expect(p.statut).toBe('en_attente');
       expect(
         await prisma.auditLog.count({ where: { action: 'paiement.jeko_montant_incoherent', entiteId: paiementId } }),
-      ).toBe(1);
+      ).toBe(2);
     });
 
     it('la tentative T1 (Orange) payée → paiement "paye", moyen réel conservé', async () => {
-      const tx = paiementReussi(referenceT1, 3_000_000);
+      const tx = paiementReussi(referenceT1, 3_150_000);
       await webhook(tx).expect(200);
       const p = await prisma.paiement.findUniqueOrThrow({ where: { id: paiementId } });
       expect(p).toMatchObject({
@@ -299,7 +315,7 @@ describe('Intégration Jèko (e2e)', () => {
     });
 
     it('un second paiement sur une demande déjà soldée est audité (trop-perçu)', async () => {
-      await webhook(paiementReussi(`YEGO-P${paiementId}-T2`, 3_000_000)).expect(200);
+      await webhook(paiementReussi(`YEGO-P${paiementId}-T2`, 3_150_000)).expect(200);
       expect(
         await prisma.auditLog.count({ where: { action: 'paiement.jeko_doublon', entiteId: paiementId } }),
       ).toBe(1);
@@ -389,7 +405,7 @@ describe('Intégration Jèko (e2e)', () => {
         .set(auth('voyageur'))
         .send({ reservationId, moyenPaiement: 'orange_money', telephonePayeur: '0701020304' })
         .expect(201);
-      await webhook(paiementReussi(pay.body.jekoReference, 1_500_000)).expect(200);
+      await webhook(paiementReussi(pay.body.jekoReference, 1_575_000)).expect(200);
       await http()
         .patch(`/api/v1/reservations/${reservationId}/annuler`)
         .set(auth('voyageur'))
@@ -400,8 +416,11 @@ describe('Intégration Jèko (e2e)', () => {
 
     it('confirmer → transfert Jèko vers le numéro payeur, puis "rembourse" au webhook', async () => {
       const { reservationId, remboursement } = await payerEnLigne();
-      // Départ dans un mois : 10 % de frais retenus.
+      // Départ dans un mois : 10 % de frais retenus, calculés sur le billet.
+      // Les 750 F de frais de service payés en plus ne sont pas remboursés.
       expect(remboursement.montantRembourse.toNumber()).toBe(13500);
+      const paye = await prisma.paiement.findUniqueOrThrow({ where: { reservationId } });
+      expect(paye.fraisService.toNumber()).toBe(750);
 
       // La liste back-office expose le paiement d'origine (choix du bouton).
       const liste = await http()

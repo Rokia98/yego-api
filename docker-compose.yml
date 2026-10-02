@@ -58,6 +58,7 @@ services:
       JEKO_ERROR_URL: ${JEKO_ERROR_URL:-}
       APP_DEEP_LINK_PAIEMENT: ${APP_DEEP_LINK_PAIEMENT:-yego://paiement}
       REVERSEMENT_COMMISSION_POURCENT: ${REVERSEMENT_COMMISSION_POURCENT:-0}
+      FRAIS_SERVICE_POURCENT: ${FRAIS_SERVICE_POURCENT:-5}
       # Documents de compagnie (registre de commerce…) : stockés sur ce volume,
       # pas en base. Survit aux redéploiements ; à sauvegarder comme yego_pgdata.
       UPLOADS_DIR: /app/uploads

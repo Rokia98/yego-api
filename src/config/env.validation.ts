@@ -135,6 +135,16 @@ export class EnvironmentVariables {
   @IsString()
   APP_DEEP_LINK_PAIEMENT?: string;
 
+  // Frais de service Yègo ajoutés au prix des billets achetés en ligne (en %).
+  // Payés par le voyageur, ni remboursés ni reversés à la compagnie.
+  @IsOptional()
+  @Transform(({ value }) =>
+    value === undefined || value === '' ? undefined : Number(value),
+  )
+  @Min(0)
+  @Max(20)
+  FRAIS_SERVICE_POURCENT = 5;
+
   // Commission Yègo retenue sur chaque reversement aux compagnies (en %).
   @IsOptional()
   @Transform(({ value }) =>

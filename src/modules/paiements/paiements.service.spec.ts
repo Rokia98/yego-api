@@ -34,6 +34,7 @@ describe('PaiementsService.create (relance idempotente)', () => {
       { record: jest.fn() } as never,
       { notifier: jest.fn() } as never,
       { estConfigure: () => false } as never,
+      { get: () => 5 } as never,
     );
   });
 
@@ -127,6 +128,7 @@ describe('PaiementsService.confirmer (webhook opérateur)', () => {
       { record: jest.fn() } as never,
       { notifier } as never,
       { estConfigure: () => false } as never,
+      { get: () => 5 } as never,
     );
   });
 
