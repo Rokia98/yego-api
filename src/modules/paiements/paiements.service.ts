@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   ForbiddenException,
   BadRequestException,
@@ -16,6 +17,19 @@ import { UserRole } from '../../config/constants';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AuthenticatedUser } from '../auth/strategies/jwt.strategy';
+import {
+  JekoService,
+  StatutJeko,
+  erreurJekoVersHttp,
+  versCentimes,
+} from '../jeko/jeko.service';
+import {
+  TELEPHONE_MOBILE_MONEY_CI,
+  confirmeParUssd,
+  depuisMoyenJeko,
+  versMoyenJeko,
+} from '../../common/moyens-paiement';
+import { normaliserTelephone } from '../../common/telephone';
 import { CreatePaiementDto } from './dto/create-paiement.dto';
 import { CreatePaiementGuichetDto } from './dto/create-paiement-guichet.dto';
 import { UpdatePaiementDto } from './dto/update-paiement.dto';
@@ -28,17 +42,29 @@ const RESERVATION_COMPAGNIE = {
   },
 };
 
+// Référence Jèko d'un paiement : une par tentative (Jèko refuse de réutiliser
+// une référence, même après un échec opérateur).
+const REFERENCE_PAIEMENT = /^YEGO-P(\d+)-T\d+$/;
+
+// Une demande Jèko cesse d'être payable 30 min après sa création : en deçà, une
+// relance identique (même moyen, même numéro) renvoie la demande en cours au
+// lieu d'en ouvrir une seconde, payable elle aussi.
+const DEMANDE_JEKO_VALIDE_MS = 25 * 60 * 1000;
+
 @Injectable()
 export class PaiementsService {
+  private readonly logger = new Logger(PaiementsService.name);
+
   constructor(
     private prisma: PrismaService,
     private audit: AuditService,
     private notifications: NotificationsService,
+    private jeko: JekoService,
   ) {}
 
-  // NOTE: en production, ceci déclenche l'appel à l'API du fournisseur
-  // mobile money (Orange Money / MTN Money / Moov Money / Wave), puis
-  // met à jour le statut via callback/webhook plutôt qu'en synchrone.
+  // Si Jèko est configuré (JEKO_API_KEY), un paiement mobile money ouvre une
+  // demande de paiement direct opérateur ; la confirmation arrive ensuite par
+  // webhook (POST /jeko/webhook) ou par réconciliation, jamais en synchrone.
   //
   // Sécurité : le montant n'est jamais pris depuis le body du client, il
   // est recalculé à partir du prix du trajet de la réservation, sinon un
@@ -51,7 +77,11 @@ export class PaiementsService {
   async create(dto: CreatePaiementDto, requestingUserId: number) {
     const reservation = await this.prisma.reservation.findUnique({
       where: { id: dto.reservationId },
-      include: { depart: { include: { trajet: true } }, paiement: true },
+      include: {
+        depart: { include: { trajet: true } },
+        paiement: true,
+        utilisateur: { select: { telephone: true } },
+      },
     });
 
     if (!reservation) {
@@ -74,6 +104,18 @@ export class PaiementsService {
       if (existant.statut === 'rembourse') {
         throw new BadRequestException('Cette réservation a été remboursée');
       }
+    }
+
+    if (this.jeko.estConfigure()) {
+      return this.initierPaiementJeko(
+        dto,
+        montant,
+        existant,
+        reservation.utilisateur?.telephone,
+      );
+    }
+
+    if (existant) {
       // 'en_attente' ou 'echoue' → on relance le même paiement.
       return this.prisma.paiement.update({
         where: { reservationId: dto.reservationId },
@@ -97,6 +139,104 @@ export class PaiementsService {
       },
       include: { reservation: true },
     });
+  }
+
+  // Ouvre (ou relance) une demande de paiement Jèko en mode direct opérateur.
+  // Réponse : le paiement + `actionRequise` pour l'app — 'redirection' (ouvrir
+  // urlPaiement : Orange / Wave / Djamo) ou 'ussd' (MTN / Moov : le payeur
+  // valide sur son téléphone, l'app affiche un écran d'attente).
+  private async initierPaiementJeko(
+    dto: CreatePaiementDto,
+    montant: Prisma.Decimal,
+    existant: {
+      id: number;
+      statut: string;
+      moyenPaiement: string;
+      telephonePayeur: string | null;
+      urlPaiement: string | null;
+      jekoDemandeLe: Date | null;
+    } | null,
+    telephoneCompte: string | undefined,
+  ) {
+    const moyenJeko = versMoyenJeko(dto.moyenPaiement);
+    if (!moyenJeko) {
+      throw new BadRequestException(
+        'Le paiement en espèces se fait au guichet, pas en ligne',
+      );
+    }
+    const telephone =
+      dto.telephonePayeur ?? (normaliserTelephone(telephoneCompte) as string | undefined);
+    if (!telephone || !TELEPHONE_MOBILE_MONEY_CI.test(telephone)) {
+      throw new BadRequestException(
+        'Indiquez le numéro Mobile Money qui paie (telephonePayeur, +225 01/05/07…)',
+      );
+    }
+
+    const actionRequise = confirmeParUssd(dto.moyenPaiement) ? 'ussd' : 'redirection';
+
+    if (
+      existant?.statut === 'en_attente' &&
+      existant.urlPaiement &&
+      existant.jekoDemandeLe &&
+      Date.now() - existant.jekoDemandeLe.getTime() < DEMANDE_JEKO_VALIDE_MS &&
+      existant.moyenPaiement === dto.moyenPaiement &&
+      existant.telephonePayeur === telephone
+    ) {
+      const enCours = await this.prisma.paiement.findUniqueOrThrow({
+        where: { id: existant.id },
+        include: { reservation: true },
+      });
+      return { ...enCours, actionRequise };
+    }
+
+    const donnees = {
+      montant,
+      moyenPaiement: dto.moyenPaiement,
+      telephonePayeur: telephone,
+      referenceTransaction: null,
+      statut: 'en_attente',
+      urlPaiement: null,
+    };
+    const paiement = existant
+      ? await this.prisma.paiement.update({
+          where: { id: existant.id },
+          data: { ...donnees, jekoTentatives: { increment: 1 } },
+        })
+      : await this.prisma.paiement.create({
+          data: { ...donnees, reservationId: dto.reservationId, jekoTentatives: 1 },
+        });
+
+    const reference = `YEGO-P${paiement.id}-T${paiement.jekoTentatives}`;
+    let demande;
+    try {
+      demande = await this.jeko.creerDemandePaiement({
+        reference,
+        montantFcfa: montant.toNumber(),
+        moyen: moyenJeko,
+        telephonePayeur: telephone,
+        reservationId: dto.reservationId,
+      });
+    } catch (err) {
+      // La référence est consommée même en cas d'échec opérateur : la
+      // prochaine relance en prendra une nouvelle (tentative + 1).
+      await this.prisma.paiement.update({
+        where: { id: paiement.id },
+        data: { statut: 'echoue', jekoReference: reference },
+      });
+      erreurJekoVersHttp(err, 'Paiement');
+    }
+
+    const maj = await this.prisma.paiement.update({
+      where: { id: paiement.id },
+      data: {
+        jekoPaymentRequestId: demande.id,
+        jekoReference: reference,
+        jekoDemandeLe: new Date(),
+        urlPaiement: demande.redirectUrl,
+      },
+      include: { reservation: true },
+    });
+    return { ...maj, actionRequise };
   }
 
   // Encaissement au guichet : un agent / company_admin enregistre un paiement
@@ -192,7 +332,7 @@ export class PaiementsService {
   // payé est un no-op (idempotent) ; un paiement remboursé, ou une réservation
   // annulée/expirée entre-temps (places peut-être revendues), donne 409 : les
   // fonds reçus sont à rembourser, pas à transformer en voyage.
-  async confirmer(reservationId: number) {
+  async confirmer(reservationId: number, referenceTransaction?: string) {
     const existant = await this.prisma.paiement.findUnique({
       where: { reservationId },
       include: { reservation: true },
@@ -216,7 +356,11 @@ export class PaiementsService {
         statut: { in: ['en_attente', 'echoue'] },
         reservation: { statut: 'confirmee' },
       },
-      data: { statut: 'paye', datePaiement: new Date() },
+      data: {
+        statut: 'paye',
+        datePaiement: new Date(),
+        ...(referenceTransaction ? { referenceTransaction } : {}),
+      },
     });
     if (maj.count === 0) {
       throw new ConflictException(
@@ -236,6 +380,171 @@ export class PaiementsService {
     });
 
     return paiement;
+  }
+
+  // Webhook Jèko TRANSACTION_COMPLETED (paiement réussi). La signature est
+  // vérifiée en amont ; on recoupe quand même le montant avec la base.
+  // Ne lève pas sur un cas métier (paiement inconnu, résa expirée…) : ces cas
+  // sont journalisés et audités, et Jèko ne doit pas rejouer le webhook.
+  async appliquerPaiementJeko(tx: {
+    reference?: string;
+    paymentRequestId?: string;
+    transactionId?: string;
+    montantCentimes?: number;
+    moyenJeko?: string;
+    telephonePayeur?: string;
+  }) {
+    const paiement = await this.trouverPaiementJeko(tx.reference, tx.paymentRequestId);
+    if (!paiement) {
+      this.logger.warn(
+        `Webhook Jèko : aucun paiement pour ${tx.reference ?? '?'} / ${tx.paymentRequestId ?? '?'}`,
+      );
+      return null;
+    }
+
+    // Jèko exprime les montants en centimes ; on tolère aussi des FCFA pour ne
+    // pas bloquer les confirmations si le format du webhook évolue.
+    if (
+      tx.montantCentimes != null &&
+      tx.montantCentimes !== versCentimes(paiement.montant.toNumber()) &&
+      tx.montantCentimes !== paiement.montant.toNumber()
+    ) {
+      this.logger.error(
+        `Webhook Jèko : montant ${tx.montantCentimes} incohérent pour le paiement ${paiement.id} (${paiement.montant} FCFA)`,
+      );
+      await this.audit.record({
+        action: 'paiement.jeko_montant_incoherent',
+        entite: 'paiement',
+        entiteId: paiement.id,
+        metadata: { ...tx, montantAttendu: paiement.montant.toString() },
+      });
+      return null;
+    }
+
+    if (paiement.statut === 'paye') {
+      // Rejeu du même webhook : no-op. Une AUTRE transaction sur un paiement
+      // déjà soldé (deux demandes payées) = trop-perçu à rembourser.
+      if (
+        tx.transactionId &&
+        paiement.referenceTransaction &&
+        paiement.referenceTransaction !== tx.transactionId
+      ) {
+        await this.audit.record({
+          action: 'paiement.jeko_doublon',
+          entite: 'paiement',
+          entiteId: paiement.id,
+          metadata: { ...tx, dejaPayePar: paiement.referenceTransaction },
+        });
+      }
+      return paiement;
+    }
+
+    // C'est peut-être une tentative antérieure (autre moyen, autre numéro) qui
+    // a été payée : on garde ce qui a réellement servi, destination d'un
+    // éventuel remboursement.
+    const moyen = depuisMoyenJeko(tx.moyenJeko);
+    const telephone =
+      tx.telephonePayeur && TELEPHONE_MOBILE_MONEY_CI.test(tx.telephonePayeur)
+        ? tx.telephonePayeur
+        : null;
+    if ((moyen && moyen !== paiement.moyenPaiement) || (telephone && telephone !== paiement.telephonePayeur)) {
+      await this.prisma.paiement.update({
+        where: { id: paiement.id },
+        data: {
+          ...(moyen ? { moyenPaiement: moyen } : {}),
+          ...(telephone ? { telephonePayeur: telephone } : {}),
+        },
+      });
+    }
+
+    try {
+      return await this.confirmer(
+        paiement.reservationId,
+        tx.transactionId ?? tx.paymentRequestId,
+      );
+    } catch (err) {
+      if (err instanceof ConflictException) {
+        this.logger.error(
+          `Paiement Jèko reçu mais non appliqué (paiement ${paiement.id}) : ${err.message} — à rembourser`,
+        );
+        await this.audit.record({
+          action: 'paiement.jeko_a_rembourser',
+          entite: 'paiement',
+          entiteId: paiement.id,
+          metadata: { ...tx, motif: err.message },
+        });
+        return null;
+      }
+      throw err;
+    }
+  }
+
+  // Demande Jèko terminée en erreur (expirée, refusée) : Jèko n'envoie pas de
+  // webhook pour un paiement échoué, on l'apprend en l'interrogeant.
+  async marquerEchecJeko(paiementId: number, motif: string | null) {
+    const maj = await this.prisma.paiement.updateMany({
+      where: { id: paiementId, statut: 'en_attente' },
+      data: { statut: 'echoue', urlPaiement: null },
+    });
+    if (maj.count === 0) return;
+    const paiement = await this.prisma.paiement.findUniqueOrThrow({
+      where: { id: paiementId },
+      include: { reservation: true },
+    });
+    await this.notifications.notifier(paiement.reservation.utilisateurId, {
+      type: 'paiement.echoue',
+      titre: 'Paiement échoué',
+      corps: "Votre paiement n'a pas abouti. Vous pouvez réessayer.",
+      donnees: { reservationId: paiement.reservationId, paiementId, motif: motif ?? '' },
+    });
+  }
+
+  // Interroge Jèko sur la demande en cours et applique son issue. Utilisé par
+  // la réconciliation périodique et par POST /paiements/reservation/:id/verifier
+  // (l'app y passe au retour de la page opérateur).
+  async synchroniserAvecJeko(paiement: {
+    id: number;
+    statut: string;
+    jekoPaymentRequestId: string | null;
+  }): Promise<StatutJeko | null> {
+    if (!paiement.jekoPaymentRequestId || paiement.statut !== 'en_attente') {
+      return null;
+    }
+    const demande = await this.jeko.lireDemandePaiement(paiement.jekoPaymentRequestId);
+    if (demande.status === 'success') {
+      await this.appliquerPaiementJeko({
+        reference: demande.reference,
+        paymentRequestId: demande.id,
+      });
+    } else if (demande.status === 'error') {
+      await this.marquerEchecJeko(paiement.id, demande.errorReason);
+    }
+    return demande.status;
+  }
+
+  async verifierAupresDeJeko(reservationId: number, user: AuthenticatedUser) {
+    const paiement = await this.findByReservation(reservationId, user);
+    if (this.jeko.estConfigure()) {
+      try {
+        await this.synchroniserAvecJeko(paiement);
+      } catch (err) {
+        erreurJekoVersHttp(err, 'Vérification du paiement');
+      }
+    }
+    return this.findByReservation(reservationId, user);
+  }
+
+  private trouverPaiementJeko(reference?: string, paymentRequestId?: string) {
+    const m = reference ? REFERENCE_PAIEMENT.exec(reference) : null;
+    if (m) {
+      return this.prisma.paiement.findUnique({ where: { id: Number(m[1]) } });
+    }
+    if (paymentRequestId) {
+      return this.prisma.paiement.findUnique({
+        where: { jekoPaymentRequestId: paymentRequestId },
+      });
+    }
+    return Promise.resolve(null);
   }
 
   // Simulation d'une réponse opérateur mobile money (flag PAYMENT_SIMULATION).
@@ -342,6 +651,13 @@ export class PaiementsService {
     if (paiement.statut === 'paye' || paiement.statut === 'rembourse') {
       throw new BadRequestException(
         'Un paiement confirmé ou remboursé ne peut pas être supprimé',
+      );
+    }
+    // Une demande Jèko reste payable ~30 min : sans la ligne, un paiement reçu
+    // ensuite ne serait plus rattachable à la réservation.
+    if (paiement.jekoReference) {
+      throw new BadRequestException(
+        'Un paiement en ligne Jèko ne peut pas être supprimé',
       );
     }
 

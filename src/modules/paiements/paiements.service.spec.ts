@@ -33,6 +33,7 @@ describe('PaiementsService.create (relance idempotente)', () => {
       prisma,
       { record: jest.fn() } as never,
       { notifier: jest.fn() } as never,
+      { estConfigure: () => false } as never,
     );
   });
 
@@ -125,6 +126,7 @@ describe('PaiementsService.confirmer (webhook opérateur)', () => {
       prisma,
       { record: jest.fn() } as never,
       { notifier } as never,
+      { estConfigure: () => false } as never,
     );
   });
 

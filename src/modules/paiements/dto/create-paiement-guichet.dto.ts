@@ -1,11 +1,12 @@
 import { IsIn, IsInt, IsOptional, IsPositive, IsString, MaxLength } from 'class-validator';
+import { MOYENS_PAIEMENT } from '../../../common/moyens-paiement';
 
 export class CreatePaiementGuichetDto {
   @IsInt()
   @IsPositive()
   reservationId: number;
 
-  @IsIn(['orange_money', 'mtn_money', 'moov_money', 'wave', 'espece'])
+  @IsIn(MOYENS_PAIEMENT)
   moyenPaiement: string;
 
   @IsOptional()

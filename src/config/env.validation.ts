@@ -4,10 +4,18 @@ import {
   IsIn,
   IsInt,
   IsOptional,
+  IsUrl,
+  Max,
+  Min,
   IsString,
   MinLength,
   validateSync,
 } from 'class-validator';
+
+// docker-compose transmet `VAR: ${VAR:-}` comme chaîne vide : on la traite
+// comme absente, sinon @IsUrl / @MinLength la rejetteraient.
+const videVersAbsent = ({ value }: { value: unknown }) =>
+  value === '' ? undefined : value;
 
 export enum Environnement {
   Development = 'development',
@@ -77,6 +85,65 @@ export class EnvironmentVariables {
   @IsIn(['true', 'false'])
   PAYMENT_SIMULATION?: string;
 
+  // ── Jèko (paiement en ligne + transferts) ─────────────────────────────────
+  // Tout ou rien : dès que JEKO_API_KEY est fourni, les autres variables JEKO_*
+  // sont exigées (voir validate()). Absentes = paiement en ligne non branché
+  // (seuls la simulation et le guichet fonctionnent).
+  @IsOptional()
+  @Transform(videVersAbsent)
+  @IsString()
+  JEKO_API_KEY?: string;
+
+  @IsOptional()
+  @Transform(videVersAbsent)
+  @IsString()
+  JEKO_API_KEY_ID?: string;
+
+  // Magasin Jèko de Yègo : encaisse les billets, débite les transferts.
+  @IsOptional()
+  @Transform(videVersAbsent)
+  @IsString()
+  JEKO_STORE_ID?: string;
+
+  // Secret de signature des webhooks (Jeko-Signature = HMAC-SHA256 hex du corps).
+  @IsOptional()
+  @Transform(videVersAbsent)
+  @IsString()
+  @MinLength(16, { message: 'JEKO_WEBHOOK_SECRET doit faire au moins 16 caractères.' })
+  JEKO_WEBHOOK_SECRET?: string;
+
+  // Pages où l'opérateur ramène le payeur (reservationId et reference ajoutés
+  // en query). Une redirection n'est PAS une preuve de paiement.
+  @IsOptional()
+  @Transform(videVersAbsent)
+  @IsUrl({ require_tld: false, require_protocol: true })
+  JEKO_SUCCESS_URL?: string;
+
+  @IsOptional()
+  @Transform(videVersAbsent)
+  @IsUrl({ require_tld: false, require_protocol: true })
+  JEKO_ERROR_URL?: string;
+
+  @IsOptional()
+  @Transform(videVersAbsent)
+  @IsUrl({ require_tld: false, require_protocol: true })
+  JEKO_API_URL = 'https://api.jeko.africa';
+
+  // Deep link de l'app mobile vers lequel relaie GET /jeko/retour/:statut.
+  @IsOptional()
+  @Transform(videVersAbsent)
+  @IsString()
+  APP_DEEP_LINK_PAIEMENT?: string;
+
+  // Commission Yègo retenue sur chaque reversement aux compagnies (en %).
+  @IsOptional()
+  @Transform(({ value }) =>
+    value === undefined || value === '' ? undefined : Number(value),
+  )
+  @Min(0)
+  @Max(50)
+  REVERSEMENT_COMMISSION_POURCENT = 0;
+
   // Seed au démarrage du conteneur (comptes de démo aux mots de passe publics,
   // cf. README). Interdit en production — voir validate().
   @IsOptional()
@@ -145,6 +212,31 @@ export function validate(config: Record<string, unknown>) {
     throw new Error(
       'PAYMENT_WEBHOOK_SECRET doit être distinct de JWT_SECRET.',
     );
+  }
+
+  if (validated.JEKO_API_KEY) {
+    const manquantes = (
+      [
+        'JEKO_API_KEY_ID',
+        'JEKO_STORE_ID',
+        'JEKO_WEBHOOK_SECRET',
+        'JEKO_SUCCESS_URL',
+        'JEKO_ERROR_URL',
+      ] as const
+    ).filter((k) => !validated[k]);
+    if (manquantes.length > 0) {
+      throw new Error(
+        `JEKO_API_KEY est défini mais il manque : ${manquantes.join(', ')}.`,
+      );
+    }
+    if (
+      validated.JEKO_WEBHOOK_SECRET === validated.JWT_SECRET ||
+      validated.JEKO_WEBHOOK_SECRET === validated.PAYMENT_WEBHOOK_SECRET
+    ) {
+      throw new Error(
+        'JEKO_WEBHOOK_SECRET doit être distinct de JWT_SECRET et de PAYMENT_WEBHOOK_SECRET.',
+      );
+    }
   }
 
   if (

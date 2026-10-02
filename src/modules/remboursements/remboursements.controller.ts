@@ -18,6 +18,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AuthenticatedUser } from '../auth/strategies/jwt.strategy';
 import { RemboursementsService } from './remboursements.service';
 import { CreateRemboursementDto } from './dto/create-remboursement.dto';
+import { ConfirmerRemboursementDto } from './dto/confirmer-remboursement.dto';
 
 @Controller('remboursements')
 @UseGuards(JwtAuthGuard)
@@ -83,7 +84,9 @@ export class RemboursementsController {
     return this.remboursementsService.findOne(id, user);
   }
 
-  // Décaissement effectif : gestionnaire de la compagnie concernée ou admin.
+  // Décaissement : gestionnaire de la compagnie concernée ou admin. Paiement
+  // encaissé via Jèko → transfert automatique (statut 'en_cours' puis
+  // 'rembourse' / 'echoue', relançable) ; sinon constat manuel.
   @UseGuards(PermissionsGuard)
   @RequirePermissions(PERMISSIONS.REMBOURSEMENT_CONFIRM)
   @Patch(':id/confirmer')
@@ -91,11 +94,13 @@ export class RemboursementsController {
     @CurrentUser() user: AuthenticatedUser,
     @Param('id', ParseIntPipe) id: number,
     @Ip() ip: string,
+    @Body() dto: ConfirmerRemboursementDto,
   ) {
-    return this.remboursementsService.confirmer(id, user, {
-      userId: user.userId,
-      role: user.role,
-      ip,
-    });
+    return this.remboursementsService.confirmer(
+      id,
+      user,
+      { userId: user.userId, role: user.role, ip },
+      dto?.mode,
+    );
   }
 }

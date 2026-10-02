@@ -80,4 +80,40 @@ describe('validate (env)', () => {
       validate({ ...prod, PAYMENT_SIMULATION: 'false', SEED_ON_START: 'false' }),
     ).not.toThrow();
   });
+  describe('Jèko', () => {
+    const jeko = {
+      JEKO_API_KEY: 'cle',
+      JEKO_API_KEY_ID: 'id-cle',
+      JEKO_STORE_ID: '59ae202a-f583-4a15-970f-9e99bd1e0baa',
+      JEKO_WEBHOOK_SECRET: 'w'.repeat(24),
+      JEKO_SUCCESS_URL: 'https://yego.ci/paiement/succes',
+      JEKO_ERROR_URL: 'https://yego.ci/paiement/echec',
+    };
+
+    it('variables Jèko vides (docker-compose) = Jèko non configuré', () => {
+      const vides = Object.fromEntries(Object.keys(jeko).map((k) => [k, '']));
+      expect(validate({ ...base, ...vides }).JEKO_API_KEY).toBeUndefined();
+    });
+
+    it('accepte une configuration Jèko complète', () => {
+      expect(() => validate({ ...base, ...jeko })).not.toThrow();
+    });
+
+    it('exige toutes les variables dès que JEKO_API_KEY est fourni', () => {
+      expect(() =>
+        validate({ ...base, ...jeko, JEKO_STORE_ID: undefined }),
+      ).toThrow(/JEKO_STORE_ID/);
+    });
+
+    it('rejette un JEKO_WEBHOOK_SECRET réutilisé', () => {
+      expect(() =>
+        validate({ ...base, ...jeko, JEKO_WEBHOOK_SECRET: base.PAYMENT_WEBHOOK_SECRET }),
+      ).toThrow(/JEKO_WEBHOOK_SECRET/);
+    });
+
+    it('borne la commission de reversement', () => {
+      expect(validate({ ...base, REVERSEMENT_COMMISSION_POURCENT: '5' }).REVERSEMENT_COMMISSION_POURCENT).toBe(5);
+      expect(() => validate({ ...base, REVERSEMENT_COMMISSION_POURCENT: '80' })).toThrow();
+    });
+  });
 });

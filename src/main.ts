@@ -8,7 +8,7 @@ import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { bufferLogs: false });
+  const app = await NestFactory.create(AppModule, { bufferLogs: false, rawBody: true });
   const config = app.get(ConfigService);
   const logger = new Logger('Bootstrap');
 
@@ -16,7 +16,16 @@ async function bootstrap() {
   app.use(helmet());
 
   // Limite la taille des corps de requête : réduit la surface d'attaque DoS.
-  app.use(json({ limit: '100kb' }));
+  // `verify` conserve le corps brut (req.rawBody) : la signature des webhooks
+  // Jèko porte sur les octets reçus, pas sur le JSON reparsé.
+  app.use(
+    json({
+      limit: '100kb',
+      verify: (req, _res, buf) => {
+        (req as typeof req & { rawBody?: Buffer }).rawBody = buf;
+      },
+    }),
+  );
   app.use(urlencoded({ extended: true, limit: '100kb' }));
 
   // CORS : liste blanche d'origines (CORS_ORIGIN, séparées par des virgules).

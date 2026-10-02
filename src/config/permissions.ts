@@ -28,6 +28,9 @@ export const PERMISSIONS = {
   RESERVATION_GUICHET: 'reservation:guichet',
   TICKET_VALIDATE: 'ticket:validate',
   REMBOURSEMENT_CONFIRM: 'remboursement:confirm',
+  // Reversements Jèko des ventes en ligne aux compagnies
+  REVERSEMENT_READ: 'reversement:read', // consulter ceux de sa compagnie
+  REVERSEMENT_MANAGE: 'reversement:manage', // déclencher un transfert (admin plateforme)
   // Personnel
   AGENT_MANAGE: 'agent:manage', // gérer les agents guichet de sa compagnie
   // Abonnement plateforme
@@ -72,6 +75,7 @@ export const MATRICE_PERMISSIONS: Record<UserRole, Permission[] | typeof TOUTES>
     PERMISSIONS.RESERVATION_GUICHET,
     PERMISSIONS.TICKET_VALIDATE,
     PERMISSIONS.REMBOURSEMENT_CONFIRM,
+    PERMISSIONS.REVERSEMENT_READ,
     PERMISSIONS.AGENT_MANAGE,
     PERMISSIONS.ABONNEMENT_READ,
     PERMISSIONS.UTILISATEUR_CREATE,

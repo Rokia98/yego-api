@@ -27,6 +27,9 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { SuiviModule } from './modules/suivi/suivi.module';
 import { DocumentsModule } from './modules/documents/documents.module';
 import { SupportModule } from './modules/support/support.module';
+import { JekoModule } from './modules/jeko/jeko.module';
+import { JekoIntegrationModule } from './modules/jeko/jeko-integration.module';
+import { ReversementsModule } from './modules/reversements/reversements.module';
 
 @Module({
   imports: [
@@ -60,6 +63,9 @@ import { SupportModule } from './modules/support/support.module';
     SuiviModule,
     DocumentsModule,
     SupportModule,
+    JekoModule,
+    ReversementsModule,
+    JekoIntegrationModule,
   ],
   providers: [
     PrismaService,

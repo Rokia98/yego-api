@@ -31,6 +31,7 @@ export async function reinitialiser(prisma: PrismaService): Promise<Fixture> {
   await prisma.ticket.deleteMany();
   await prisma.remboursement.deleteMany();
   await prisma.paiement.deleteMany();
+  await prisma.reversement.deleteMany();
   await prisma.reservation.deleteMany();
   await prisma.depart.deleteMany();
   await prisma.trajet.deleteMany();

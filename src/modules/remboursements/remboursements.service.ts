@@ -1,6 +1,8 @@
 import {
   Injectable,
+  Logger,
   BadRequestException,
+  ConflictException,
   NotFoundException,
   ForbiddenException,
 } from '@nestjs/common';
@@ -15,6 +17,8 @@ import { UserRole } from '../../config/constants';
 import { paginer } from '../../common/pagination';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AuthenticatedUser } from '../auth/strategies/jwt.strategy';
+import { JekoService, StatutJeko, erreurJekoVersHttp } from '../jeko/jeko.service';
+import { versMoyenJeko } from '../../common/moyens-paiement';
 import { CreateRemboursementDto } from './dto/create-remboursement.dto';
 
 export interface ActeurContexte {
@@ -47,6 +51,17 @@ const RESERVATION_LISTE = {
     include: {
       utilisateur: { select: UTILISATEUR_SAFE_SELECT },
       agent: { select: UTILISATEUR_SAFE_SELECT },
+      // Le back-office en déduit le bouton à proposer : jekoReference non null
+      // = transfert Mobile Money possible vers telephonePayeur.
+      paiement: {
+        select: {
+          id: true,
+          moyenPaiement: true,
+          jekoReference: true,
+          telephonePayeur: true,
+          reversementId: true,
+        },
+      },
       depart: {
         include: {
           trajet: {
@@ -62,12 +77,30 @@ const RESERVATION_LISTE = {
   },
 };
 
+// Remboursement + ce qu'il faut pour le décaisser (paiement d'origine, voyageur).
+const RESERVATION_DECAISSEMENT = {
+  reservation: {
+    include: {
+      paiement: true,
+      utilisateur: { select: { nom: true } },
+      depart: { include: { trajet: { select: { compagnieId: true } } } },
+    },
+  },
+};
+
+type RemboursementADecaisser = Prisma.RemboursementGetPayload<{
+  include: typeof RESERVATION_DECAISSEMENT;
+}>;
+
 @Injectable()
 export class RemboursementsService {
+  private readonly logger = new Logger(RemboursementsService.name);
+
   constructor(
     private prisma: PrismaService,
     private audit: AuditService,
     private notifications: NotificationsService,
+    private jeko: JekoService,
   ) {}
 
   // montantRembourse est recalculé côté serveur à partir du montant réellement
@@ -143,11 +176,19 @@ export class RemboursementsService {
     return remboursement;
   }
 
-  // Confirmation du virement : company_admin de la compagnie concernée, ou admin.
-  async confirmer(id: number, user: AuthenticatedUser, ctx?: ActeurContexte) {
+  // Confirmation : company_admin de la compagnie concernée, ou admin.
+  // Paiement encaissé via Jèko → transfert automatique vers le numéro qui a
+  // payé (statut 'en_cours', soldé par webhook / réconciliation). Sinon (ou
+  // mode 'manuel') → on constate un décaissement fait hors plateforme.
+  async confirmer(
+    id: number,
+    user: AuthenticatedUser,
+    ctx?: ActeurContexte,
+    mode?: 'jeko' | 'manuel',
+  ) {
     const remboursement = await this.prisma.remboursement.findUnique({
       where: { id },
-      include: RESERVATION_COMPAGNIE,
+      include: RESERVATION_DECAISSEMENT,
     });
     if (!remboursement) {
       throw new NotFoundException(`Remboursement ${id} introuvable`);
@@ -159,17 +200,196 @@ export class RemboursementsService {
     if (remboursement.statut === 'rembourse') {
       throw new BadRequestException('Ce remboursement est déjà confirmé');
     }
+    if (remboursement.statut === 'en_cours') {
+      throw new ConflictException(
+        'Un transfert de remboursement est déjà en cours',
+      );
+    }
     if (remboursement.reservation.statut !== 'annulee') {
       throw new BadRequestException(
         "La réservation n'est pas annulée : rien à rembourser",
       );
     }
 
-    // Décaissement effectué : on marque aussi le paiement d'origine comme remboursé.
+    const paiement = remboursement.reservation.paiement;
+    const possibleViaJeko =
+      this.jeko.estConfigure() &&
+      !!paiement?.jekoReference &&
+      remboursement.montantRembourse.greaterThan(0);
+    const modeEffectif = mode ?? (possibleViaJeko ? 'jeko' : 'manuel');
+
+    if (modeEffectif === 'jeko') {
+      if (!possibleViaJeko) {
+        throw new BadRequestException(
+          "Remboursement Jèko impossible : le paiement n'a pas été encaissé en ligne via Jèko (ou rien à rembourser)",
+        );
+      }
+      return this.transfererRemboursement(remboursement, ctx);
+    }
+
+    return this.finaliser(remboursement, ctx, 'manuel');
+  }
+
+  // Transfert Jèko du montant remboursé vers le numéro qui a payé. Le
+  // bénéficiaire est imposé par le paiement d'origine : la compagnie ne peut
+  // pas le choisir.
+  private async transfererRemboursement(
+    remboursement: RemboursementADecaisser,
+    ctx?: ActeurContexte,
+  ) {
+    const paiement = remboursement.reservation.paiement!;
+    if (paiement.reversementId != null) {
+      throw new BadRequestException(
+        'Ce paiement a déjà été reversé à la compagnie : remboursement à régulariser manuellement',
+      );
+    }
+    const moyen = versMoyenJeko(paiement.moyenPaiement);
+    if (!moyen || !paiement.telephonePayeur) {
+      throw new BadRequestException(
+        'Numéro ou moyen du payeur inconnu : remboursez en mode manuel',
+      );
+    }
+
+    // Verrou : un seul transfert à la fois (en_attente | echoue → en_cours).
+    const verrou = await this.prisma.remboursement.updateMany({
+      where: { id: remboursement.id, statut: { in: ['en_attente', 'echoue'] } },
+      data: {
+        statut: 'en_cours',
+        motifEchec: null,
+        jekoTentatives: { increment: 1 },
+      },
+    });
+    if (verrou.count === 0) {
+      throw new ConflictException('Le remboursement a changé d’état, réessayez');
+    }
+    const { jekoTentatives } = await this.prisma.remboursement.findUniqueOrThrow({
+      where: { id: remboursement.id },
+      select: { jekoTentatives: true },
+    });
+    const reference = `YEGO-RB${remboursement.id}-T${jekoTentatives}`;
+
+    let transfert;
+    try {
+      const contactId = await this.jeko.creerContact({
+        nom:
+          remboursement.reservation.utilisateur?.nom ??
+          remboursement.reservation.passagerNom ??
+          'Voyageur Yègo',
+        moyen,
+        telephone: paiement.telephonePayeur,
+      });
+      transfert = await this.jeko.creerTransfert({
+        contactId,
+        montantFcfa: remboursement.montantRembourse.toNumber(),
+        reference,
+        description: `Remboursement Yègo réservation #${remboursement.reservationId}`,
+      });
+    } catch (err) {
+      await this.prisma.remboursement.update({
+        where: { id: remboursement.id },
+        data: {
+          statut: 'echoue',
+          jekoReference: reference,
+          motifEchec: (err as Error).message.slice(0, 500),
+        },
+      });
+      erreurJekoVersHttp(err, 'Remboursement');
+    }
+
+    await this.prisma.remboursement.update({
+      where: { id: remboursement.id },
+      data: { jekoTransferId: transfert.id, jekoReference: reference },
+    });
+    await this.audit.record({
+      action: 'remboursement.transfert_initie',
+      entite: 'remboursement',
+      entiteId: remboursement.id,
+      acteurId: ctx?.userId,
+      acteurRole: ctx?.role,
+      ip: ctx?.ip,
+      metadata: {
+        reservationId: remboursement.reservationId,
+        montantRembourse: remboursement.montantRembourse.toString(),
+        reference,
+        jekoTransferId: transfert.id,
+      },
+    });
+
+    if (transfert.status !== 'pending') {
+      await this.appliquerResultatTransfert(remboursement.id, transfert.status, {
+        transferId: transfert.id,
+      });
+    }
+    return this.prisma.remboursement.findUniqueOrThrow({
+      where: { id: remboursement.id },
+    });
+  }
+
+  // Issue d'un transfert de remboursement (webhook Jèko ou réconciliation).
+  // Idempotent : ignoré si le remboursement n'est plus 'en_cours'.
+  async appliquerResultatTransfert(
+    id: number,
+    statut: StatutJeko,
+    details: { transferId?: string; motif?: string } = {},
+  ) {
+    if (statut === 'pending') return;
+    const remboursement = await this.prisma.remboursement.findUnique({
+      where: { id },
+      include: RESERVATION_DECAISSEMENT,
+    });
+    if (!remboursement || remboursement.statut !== 'en_cours') return;
+    if (
+      details.transferId &&
+      remboursement.jekoTransferId &&
+      details.transferId !== remboursement.jekoTransferId
+    ) {
+      this.logger.warn(
+        `Transfert ${details.transferId} ignoré : le remboursement ${id} suit ${remboursement.jekoTransferId}`,
+      );
+      return;
+    }
+
+    if (statut === 'success') {
+      await this.finaliser(remboursement, undefined, 'jeko');
+      return;
+    }
+
+    await this.prisma.remboursement.updateMany({
+      where: { id, statut: 'en_cours' },
+      data: { statut: 'echoue', motifEchec: details.motif ?? 'Transfert refusé par l’opérateur' },
+    });
+    await this.audit.record({
+      action: 'remboursement.transfert_echoue',
+      entite: 'remboursement',
+      entiteId: id,
+      metadata: {
+        reservationId: remboursement.reservationId,
+        jekoTransferId: remboursement.jekoTransferId,
+        motif: details.motif,
+      },
+    });
+  }
+
+  // Réconciliation : interroge Jèko sur un transfert resté 'en_cours'.
+  async synchroniserTransfert(remboursement: { id: number; jekoTransferId: string | null }) {
+    if (!remboursement.jekoTransferId) return;
+    const transfert = await this.jeko.lireTransfert(remboursement.jekoTransferId);
+    await this.appliquerResultatTransfert(remboursement.id, transfert.status, {
+      transferId: transfert.id,
+    });
+  }
+
+  // Décaissement constaté : remboursement soldé + paiement d'origine remboursé.
+  private async finaliser(
+    remboursement: RemboursementADecaisser,
+    ctx: ActeurContexte | undefined,
+    via: 'jeko' | 'manuel',
+  ) {
+    const id = remboursement.id;
     const [maj] = await this.prisma.$transaction([
       this.prisma.remboursement.update({
         where: { id },
-        data: { statut: 'rembourse', dateRemboursement: new Date() },
+        data: { statut: 'rembourse', dateRemboursement: new Date(), motifEchec: null },
       }),
       this.prisma.paiement.updateMany({
         where: { reservationId: remboursement.reservationId, statut: 'paye' },
@@ -187,13 +407,17 @@ export class RemboursementsService {
       metadata: {
         reservationId: remboursement.reservationId,
         montantRembourse: remboursement.montantRembourse.toString(),
+        via,
       },
     });
 
     await this.notifications.notifier(remboursement.reservation.utilisateurId, {
       type: 'remboursement.effectue',
       titre: 'Remboursement effectué',
-      corps: `${remboursement.montantRembourse} FCFA vous ont été remboursés.`,
+      corps:
+        via === 'jeko'
+          ? `${remboursement.montantRembourse} FCFA ont été renvoyés sur votre Mobile Money.`
+          : `${remboursement.montantRembourse} FCFA vous ont été remboursés.`,
       donnees: { remboursementId: id, reservationId: remboursement.reservationId },
     });
 

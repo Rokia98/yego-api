@@ -31,8 +31,15 @@ model Compagnie {
   logoUrl       String?        @map("logo_url")
   statut        String         @default("en_attente")
   dateCreation  DateTime       @default(now()) @map("date_creation")
+  // Coordonnées de reversement (Mobile Money) : où Yègo transfère, via Jèko,
+  // les billets vendus en ligne. jekoContactId = contact bénéficiaire créé
+  // chez Jèko pour ces coordonnées (remis à NULL quand elles changent).
+  reversementMoyen     String?  @map("reversement_moyen")
+  reversementTelephone String?  @map("reversement_telephone")
+  jekoContactId        String?  @map("jeko_contact_id")
 
   abonnements   Abonnement[]
+  reversements  Reversement[]
   vehicules     Vehicule[]
   chauffeurs    Chauffeur[]
   trajets       Trajet[]
@@ -317,9 +324,24 @@ model Paiement {
   referenceTransaction   String?     @map("reference_transaction")
   statut                 String      @default("en_attente")
   datePaiement           DateTime?   @map("date_paiement")
+  // Paiement en ligne via Jèko : une demande de paiement par tentative, de
+  // référence YEGO-P<id>-T<n> (Jèko refuse de réutiliser une référence).
+  jekoPaymentRequestId   String?     @unique @map("jeko_payment_request_id")
+  jekoReference          String?     @map("jeko_reference")
+  jekoTentatives         Int         @default(0) @map("jeko_tentatives")
+  jekoDemandeLe          DateTime?   @map("jeko_demande_le")
+  // URL à ouvrir côté app (opérateur Orange/Wave/Djamo, ou page d'attente
+  // Jèko pour MTN/Moov qui confirment par USSD).
+  urlPaiement            String?     @map("url_paiement")
+  // Numéro qui a payé : destination d'un éventuel remboursement.
+  telephonePayeur        String?     @map("telephone_payeur")
+  // Reversement à la compagnie qui a soldé ce paiement (NULL = pas encore reversé).
+  reversementId          Int?        @map("reversement_id")
 
   reservation            Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  reversement            Reversement? @relation(fields: [reversementId], references: [id], onDelete: SetNull)
 
+  @@index([reversementId])
   @@map("paiements")
 }
 
@@ -331,10 +353,44 @@ model Remboursement {
   statut              String      @default("en_attente")
   dateDemande         DateTime    @default(now()) @map("date_demande")
   dateRemboursement   DateTime?   @map("date_remboursement")
+  // Remboursement par transfert Jèko vers le numéro qui a payé :
+  // en_attente → en_cours (transfert initié) → rembourse | echoue.
+  jekoTransferId      String?     @unique @map("jeko_transfer_id")
+  jekoReference       String?     @map("jeko_reference")
+  jekoTentatives      Int         @default(0) @map("jeko_tentatives")
+  motifEchec          String?     @map("motif_echec")
 
   reservation         Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
 
   @@map("remboursements")
+}
+
+// Reversement à une compagnie, par transfert Jèko, des billets payés en ligne
+// (encaissés sur le magasin Jèko de Yègo). Solde un lot de paiements :
+// en_cours → effectue | echoue (les paiements sont alors libérés).
+model Reversement {
+  id              Int        @id @default(autoincrement())
+  compagnieId     Int        @map("compagnie_id")
+  montantBrut     Decimal    @map("montant_brut") @db.Decimal(12, 2)
+  commission      Decimal    @default(0) @db.Decimal(12, 2)
+  montantNet      Decimal    @map("montant_net") @db.Decimal(12, 2)
+  nombrePaiements Int        @map("nombre_paiements")
+  moyen           String
+  beneficiaire    String
+  statut          String     @default("en_cours")
+  jekoTransferId  String?    @unique @map("jeko_transfer_id")
+  jekoReference   String?    @unique @map("jeko_reference")
+  fraisJeko       Decimal?   @map("frais_jeko") @db.Decimal(12, 2)
+  motifEchec      String?    @map("motif_echec")
+  creeParId       Int?       @map("cree_par_id")
+  dateCreation    DateTime   @default(now()) @map("date_creation")
+  dateEffectue    DateTime?  @map("date_effectue")
+
+  compagnie       Compagnie  @relation(fields: [compagnieId], references: [id], onDelete: Restrict)
+  paiements       Paiement[]
+
+  @@index([compagnieId])
+  @@map("reversements")
 }
 
 // Demande d'assistance (support) : ouverte par un voyageur (app mobile) ou le

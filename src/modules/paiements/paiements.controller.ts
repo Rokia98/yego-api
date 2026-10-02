@@ -87,6 +87,18 @@ export class PaiementsController {
     return this.paiementsService.confirmer(reservationId);
   }
 
+  // Interroge Jèko sur le paiement en attente et applique son issue (payé /
+  // échoué). À appeler au retour de la page opérateur ou depuis l'écran
+  // d'attente USSD : le webhook reste la source principale.
+  @UseGuards(JwtAuthGuard)
+  @Post('reservation/:reservationId/verifier')
+  verifier(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('reservationId', ParseIntPipe) reservationId: number,
+  ) {
+    return this.paiementsService.verifierAupresDeJeko(reservationId, user);
+  }
+
   // Simulation opérateur (mode PAYMENT_SIMULATION uniquement) : le voyageur
   // force le résultat de SON paiement sans transaction réelle. 404 si le flag
   // n'est pas actif.

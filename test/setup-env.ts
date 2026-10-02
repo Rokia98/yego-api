@@ -10,6 +10,20 @@ process.env.PAYMENT_WEBHOOK_SECRET =
 process.env.PAYMENT_SIMULATION = 'true';
 process.env.UPLOADS_DIR = process.env.UPLOADS_DIR ?? './uploads-test';
 process.env.RESERVATION_PAIEMENT_TTL_MINUTES = '30';
+// Jèko désactivé par défaut, quel que soit le .env local (pas de vrai appel
+// depuis les tests) ; jeko-env.ts le réactive vers un faux serveur.
+for (const k of [
+  'JEKO_API_KEY',
+  'JEKO_API_KEY_ID',
+  'JEKO_STORE_ID',
+  'JEKO_WEBHOOK_SECRET',
+  'JEKO_SUCCESS_URL',
+  'JEKO_ERROR_URL',
+  'JEKO_API_URL',
+  'REVERSEMENT_COMMISSION_POURCENT',
+]) {
+  process.env[k] = '';
+}
 // La base de test : schéma dédié dans la base de dev, ou DATABASE_URL_TEST en CI.
 process.env.DATABASE_URL =
   process.env.DATABASE_URL_TEST ??
