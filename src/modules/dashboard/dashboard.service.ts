@@ -64,7 +64,7 @@ export class DashboardService {
           by: ['statut'],
           where: { reservation: whereReservation },
           _count: true,
-          _sum: { montant: true },
+          _sum: { montant: true, fraisService: true },
         }),
         this.prisma.depart.findMany({
           where: whereDepart,
@@ -120,6 +120,16 @@ export class DashboardService {
             },
           ]),
         ),
+        // Frais de service encaissés (paiements 'paye') : revenu Yègo, exposé
+        // à l'admin seulement — ce n'est pas le chiffre d'affaires compagnie.
+        ...(user.role === UserRole.ADMIN
+          ? {
+              fraisService: (
+                parStatutPaiement.find((p) => p.statut === 'paye')?._sum.fraisService ??
+                new Prisma.Decimal(0)
+              ).toString(),
+            }
+          : {}),
       },
       occupation: {
         departs: departsPeriode.length,

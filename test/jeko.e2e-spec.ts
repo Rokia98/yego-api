@@ -334,6 +334,15 @@ describe('Intégration Jèko (e2e)', () => {
       expect(echec.headers.location).toBe('yego://paiement?statut=echec');
     });
 
+    it('dashboard : frais de service encaissés visibles par l’admin seulement', async () => {
+      const admin = await http().get('/api/v1/dashboard/resume').set(auth('admin')).expect(200);
+      // Paiement T1 confirmé : 2 billets → 1 500 F de frais.
+      expect(Number(admin.body.chiffreAffaires.fraisService)).toBe(1500);
+      expect(Number(admin.body.chiffreAffaires.parStatutPaiement.paye.montant)).toBe(30000);
+      const gestionnaire = await http().get('/api/v1/dashboard/resume').set(auth('gestionnaire')).expect(200);
+      expect(gestionnaire.body.chiffreAffaires.fraisService).toBeUndefined();
+    });
+
     it('événement non transactionnel → 200 ignoré', () =>
       webhook({ id: 'x', status: 'pending' }, { evenement: 'SERVICE_PROVIDER_LINK_REQUEST' }).expect(200));
   });
