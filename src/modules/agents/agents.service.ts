@@ -50,6 +50,9 @@ export class AgentsService {
         telephone: dto.telephone,
         email: dto.email,
         motDePasseHash: await bcrypt.hash(dto.motDePasse, BCRYPT_ROUNDS),
+        // Choisi par le gestionnaire : l'agent doit le changer à sa première
+        // connexion (imposé par JwtAuthGuard).
+        doitChangerMotDePasse: true,
         role: UserRole.AGENT,
         compagnieId,
       },
@@ -83,8 +86,13 @@ export class AgentsService {
       telephone: dto.telephone,
       email: dto.email,
     };
+    // Réinitialisation par le gestionnaire : mot de passe de nouveau
+    // temporaire, et les sessions en cours de l'agent sont coupées.
+    const reinitialisation = !!dto.motDePasse;
     if (dto.motDePasse) {
       data.motDePasseHash = await bcrypt.hash(dto.motDePasse, BCRYPT_ROUNDS);
+      data.doitChangerMotDePasse = true;
+      data.tokenVersion = { increment: 1 };
     }
     // Désactivation : on coupe aussi les sessions en cours.
     if (dto.actif === false) {
@@ -95,11 +103,20 @@ export class AgentsService {
     }
 
     try {
-      return await this.prisma.utilisateur.update({
+      const agent = await this.prisma.utilisateur.update({
         where: { id },
         data,
         select: AGENT_SELECT,
       });
+      // tokenVersion ne suffit pas : un refresh token encore valide
+      // rouvrirait une session avec la nouvelle version.
+      if (reinitialisation || dto.actif === false) {
+        await this.prisma.refreshToken.updateMany({
+          where: { utilisateurId: id, revokedAt: null },
+          data: { revokedAt: new Date() },
+        });
+      }
+      return agent;
     } catch (e) {
       if (
         e instanceof Prisma.PrismaClientKnownRequestError &&

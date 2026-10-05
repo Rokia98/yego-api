@@ -540,6 +540,26 @@ describe('Yègo API (e2e)', () => {
         .expect(400);
     });
 
+    it('agent : mot de passe choisi par le gestionnaire = temporaire ; réinitialisation coupe les sessions', async () => {
+      const agent = await prisma.utilisateur.findUniqueOrThrow({ where: { telephone: '+2250700998877' } });
+      expect(agent.doitChangerMotDePasse).toBe(true);
+
+      await prisma.refreshToken.create({
+        data: { utilisateurId: agent.id, tokenHash: `test-${agent.id}`, expiresAt: new Date(Date.now() + 86400000) },
+      });
+      await http()
+        .patch(`/api/v1/agents/${agent.id}`)
+        .set(auth('gestionnaire'))
+        .send({ motDePasse: 'Reinitialise1' })
+        .expect(200);
+      const apres = await prisma.utilisateur.findUniqueOrThrow({ where: { id: agent.id } });
+      expect(apres.doitChangerMotDePasse).toBe(true);
+      expect(apres.tokenVersion).toBe(agent.tokenVersion + 1);
+      expect(
+        await prisma.refreshToken.count({ where: { utilisateurId: agent.id, revokedAt: null } }),
+      ).toBe(0);
+    });
+
     it('départ : statut hors liste refusé (400) ; un agent ne peut plus modifier un départ (403)', async () => {
       await http()
         .patch(`/api/v1/departs/${fx.departFuturId}`)
