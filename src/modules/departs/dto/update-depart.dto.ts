@@ -1,4 +1,5 @@
-import { IsInt, IsOptional, IsPositive, IsString } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsPositive, IsString } from 'class-validator';
+import { DepartStatut } from '../../../config/constants';
 
 export class UpdateDepartDto {
   @IsOptional()
@@ -21,6 +22,6 @@ export class UpdateDepartDto {
   placesTotales?: number;
 
   @IsOptional()
-  @IsString()
+  @IsIn(Object.values(DepartStatut))
   statut?: string;
 }

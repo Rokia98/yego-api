@@ -27,7 +27,7 @@ export class SuiviController {
 
   // Back-office : démarre le départ, renvoie le jeton de suivi du chauffeur.
   @UseGuards(JwtAuthGuard, PermissionsGuard)
-  @RequirePermissions(PERMISSIONS.DEPART_MANAGE)
+  @RequirePermissions(PERMISSIONS.DEPART_OPERER)
   @Post(':id/demarrer')
   demarrer(
     @CurrentUser() user: AuthenticatedUser,
@@ -48,7 +48,7 @@ export class SuiviController {
 
   // Back-office : déclare un retard (sans GPS). Notifie les voyageurs.
   @UseGuards(JwtAuthGuard, PermissionsGuard)
-  @RequirePermissions(PERMISSIONS.DEPART_MANAGE)
+  @RequirePermissions(PERMISSIONS.DEPART_OPERER)
   @Post(':id/retard')
   declarerRetard(
     @CurrentUser() user: AuthenticatedUser,

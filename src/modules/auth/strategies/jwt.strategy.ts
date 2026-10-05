@@ -24,6 +24,8 @@ export interface AuthenticatedUser {
   telephone: string;
   role: UserRole;
   compagnieId: number | null;
+  // Mot de passe temporaire non encore changé (relu en base à chaque requête).
+  doitChangerMotDePasse?: boolean;
 }
 
 @Injectable()
@@ -52,6 +54,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         actif: true,
         compagnieId: true,
         tokenVersion: true,
+        doitChangerMotDePasse: true,
       },
     });
 
@@ -67,6 +70,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       telephone: utilisateur.telephone,
       role: utilisateur.role as UserRole,
       compagnieId: utilisateur.compagnieId,
+      doitChangerMotDePasse: utilisateur.doitChangerMotDePasse,
     };
   }
 }

@@ -12,6 +12,13 @@ async function bootstrap() {
   const config = app.get(ConfigService);
   const logger = new Logger('Bootstrap');
 
+  // Derrière un proxy (ngrok, load balancer) : IP réelle du visiteur pour la
+  // limitation de débit et l'audit (voir TRUST_PROXY).
+  const proxys = Number(config.get('TRUST_PROXY') ?? 0);
+  if (proxys > 0) {
+    app.getHttpAdapter().getInstance().set('trust proxy', proxys);
+  }
+
   // En-têtes HTTP de sécurité (XSS, sniffing, clickjacking, HSTS, etc.).
   app.use(helmet());
 
@@ -65,7 +72,7 @@ async function bootstrap() {
     const swaggerConfig = new DocumentBuilder()
       .setTitle('Yègo API')
       .setDescription('API de réservation de tickets de transport interurbain')
-      .setVersion('0.12.0')
+      .setVersion(process.env.npm_package_version ?? '0.29.0')
       .addBearerAuth()
       .build();
     const document = SwaggerModule.createDocument(app, swaggerConfig);

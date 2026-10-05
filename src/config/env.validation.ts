@@ -183,6 +183,20 @@ export class EnvironmentVariables {
   @IsString()
   LOG_LEVEL = 'log';
 
+  // Nombre de proxys de confiance devant l'API (ngrok, load balancer…) : l'IP
+  // du visiteur est alors lue dans X-Forwarded-For, sinon tous les visiteurs
+  // partagent l'IP du proxy et la limitation de débit devient commune (un
+  // attaquant bloque les connexions de tout le monde). 0 = accès direct :
+  // ne PAS l'activer sans proxy, l'en-tête serait falsifiable.
+  @IsOptional()
+  @Transform(({ value }) =>
+    value === undefined || value === '' ? undefined : Number(value),
+  )
+  @IsInt()
+  @Min(0)
+  @Max(5)
+  TRUST_PROXY = 0;
+
   // Notifications push (Firebase Cloud Messaging). Toutes optionnelles :
   // sans elles, les notifications sont persistées (fil in-app) mais pas
   // envoyées en push — utile en dev / sans compte Firebase.

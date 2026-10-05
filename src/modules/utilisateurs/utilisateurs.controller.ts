@@ -13,6 +13,7 @@ import {
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
+import { AutoriseMotDePasseTemporaire } from '../../common/decorators/mot-de-passe-temporaire.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { PERMISSIONS } from '../../config/permissions';
 import { UserRole } from '../../config/constants';
@@ -57,6 +58,7 @@ export class UtilisateursController {
 
   // Un utilisateur ne peut consulter que son propre profil ; un admin, tous.
   @UseGuards(JwtAuthGuard)
+  @AutoriseMotDePasseTemporaire()
   @Get(':id')
   findOne(
     @CurrentUser() user: AuthenticatedUser,

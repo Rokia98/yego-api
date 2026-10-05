@@ -14,6 +14,7 @@ import { assertCompagnieScope } from '../../common/scope';
 import { paginer } from '../../common/pagination';
 import { versMoyenJeko } from '../../common/moyens-paiement';
 import { UserRole } from '../../config/constants';
+import { NotificationsService } from '../notifications/notifications.service';
 import {
   JekoService,
   StatutJeko,
@@ -29,6 +30,11 @@ const PLAFOND_TRANSFERT_FCFA = 2_000_000;
 // Minimum par transfert (Moov : 100 F, autres réseaux : 5 F).
 const MINIMUM_TRANSFERT_FCFA: Record<string, number> = { moov_money: 100 };
 const MINIMUM_PAR_DEFAUT_FCFA = 5;
+
+// Délai de sécurité après un changement de compte de reversement fait par la
+// compagnie : un compte gestionnaire piraté ne peut pas détourner tout de
+// suite les fonds ; les admins sont prévenus et peuvent confirmer avant.
+const DELAI_SECURITE_COORDONNEES_MS = 24 * 60 * 60 * 1000;
 
 export interface ActeurContexte {
   userId: number;
@@ -64,6 +70,7 @@ export class ReversementsService {
     private audit: AuditService,
     private jeko: JekoService,
     private config: ConfigService,
+    private notifications: NotificationsService,
   ) {}
 
   async apercu(compagnieId: number, user: AuthenticatedUser) {
@@ -84,6 +91,9 @@ export class ReversementsService {
       // true : il reste des paiements éligibles au-delà de ce lot.
       plafondAtteint: lot.plafondAtteint,
       reversementsEnCours: enCours,
+      // Délai de sécurité en cours après un changement de compte par la
+      // compagnie (null = reversement possible).
+      bloqueJusquA: this.finDelaiSecurite(compagnie.reversementCoordonneesModifieesLe),
     };
   }
 
@@ -101,6 +111,15 @@ export class ReversementsService {
     if (!moyen || !moyenJeko || !telephone) {
       throw new BadRequestException(
         'La compagnie n’a pas renseigné son compte Mobile Money de reversement',
+      );
+    }
+
+    const modifieesLe = compagnie.reversementCoordonneesModifieesLe;
+    if (modifieesLe && Date.now() - modifieesLe.getTime() < DELAI_SECURITE_COORDONNEES_MS) {
+      const libre = new Date(modifieesLe.getTime() + DELAI_SECURITE_COORDONNEES_MS);
+      throw new BadRequestException(
+        `Compte de reversement modifié par la compagnie il y a moins de 24 h : reversement bloqué jusqu'au ${libre.toISOString()}. ` +
+          'Après vérification auprès de la compagnie, un admin peut lever le délai en réenregistrant les coordonnées (PUT /reversements/coordonnees/:id).',
       );
     }
 
@@ -268,14 +287,30 @@ export class ReversementsService {
   ) {
     assertCompagnieScope(user, compagnieId);
     const avant = await this.compagnieOu404(compagnieId);
+    const parAdmin = user.role === UserRole.ADMIN;
     const maj = await this.prisma.compagnie.update({
       where: { id: compagnieId },
       data: {
         reversementMoyen: dto.moyen,
         reversementTelephone: dto.telephone,
         jekoContactId: null,
+        reversementCoordonneesModifieesLe: parAdmin ? null : new Date(),
       },
     });
+    if (!parAdmin) {
+      const admins = await this.prisma.utilisateur.findMany({
+        where: { role: UserRole.ADMIN, actif: true },
+        select: { id: true },
+      });
+      for (const a of admins) {
+        await this.notifications.notifier(a.id, {
+          type: 'reversement.coordonnees_modifiees',
+          titre: 'Compte de reversement modifié',
+          corps: `${avant.nom} a changé son compte de reversement (${dto.moyen} ${dto.telephone}). Reversements bloqués 24 h : vérifiez auprès de la compagnie.`,
+          donnees: { compagnieId },
+        });
+      }
+    }
     await this.audit.record({
       action: 'compagnie.coordonnees_reversement',
       entite: 'compagnie',
@@ -464,6 +499,12 @@ export class ReversementsService {
     const compagnie = await this.prisma.compagnie.findUnique({ where: { id } });
     if (!compagnie) throw new NotFoundException(`Compagnie ${id} introuvable`);
     return compagnie;
+  }
+
+  private finDelaiSecurite(modifieesLe: Date | null): Date | null {
+    if (!modifieesLe) return null;
+    const fin = new Date(modifieesLe.getTime() + DELAI_SECURITE_COORDONNEES_MS);
+    return fin.getTime() > Date.now() ? fin : null;
   }
 
   private coordonneesDe(c: { reversementMoyen: string | null; reversementTelephone: string | null }) {

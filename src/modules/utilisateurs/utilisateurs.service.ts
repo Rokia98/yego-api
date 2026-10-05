@@ -39,7 +39,7 @@ export class UtilisateursService {
     }
 
     const motDePasseHash = dto.motDePasse
-      ? await bcrypt.hash(dto.motDePasse, 10)
+      ? await bcrypt.hash(dto.motDePasse, 12)
       : null;
 
     return this.prisma.utilisateur.create({
@@ -95,19 +95,12 @@ export class UtilisateursService {
       }
     }
 
-    const motDePasseHash = dto.motDePasse
-      ? await bcrypt.hash(dto.motDePasse, 10)
-      : undefined;
-
     return this.prisma.utilisateur.update({
       where: { id },
       data: {
         nom: dto.nom,
         email: dto.email,
         photoUrl: dto.photoUrl,
-        // Un mot de passe changé ici (par soi-même ou un admin) n'est plus
-        // "temporaire", quel que soit le chemin emprunté pour le poser.
-        ...(motDePasseHash && { motDePasseHash, doitChangerMotDePasse: false }),
       },
       select: UTILISATEUR_SAFE_SELECT,
     });

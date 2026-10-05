@@ -37,6 +37,10 @@ model Compagnie {
   reversementMoyen     String?  @map("reversement_moyen")
   reversementTelephone String?  @map("reversement_telephone")
   jekoContactId        String?  @map("jeko_contact_id")
+  // Dernière modification de ces coordonnées par la compagnie elle-même :
+  // reversements bloqués 24 h (délai de sécurité contre un compte piraté).
+  // NULL quand c'est l'admin qui les a posées ou confirmées.
+  reversementCoordonneesModifieesLe DateTime? @map("reversement_coordonnees_modifiees_le")
 
   abonnements   Abonnement[]
   reversements  Reversement[]

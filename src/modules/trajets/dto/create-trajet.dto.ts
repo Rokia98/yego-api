@@ -1,4 +1,5 @@
-import { IsInt, IsString, IsNumber, IsOptional } from 'class-validator';
+import { IsInt, IsString, IsNumber, IsOptional, Min, Max } from 'class-validator';
+import { PRIX_BILLET_MAX, PRIX_BILLET_MIN } from '../../../config/constants';
 
 export class CreateTrajetDto {
   @IsInt()
@@ -17,7 +18,11 @@ export class CreateTrajetDto {
   @IsString()
   heureArriveeEstimee?: string;
 
+  // Borné : un prix nul ou négatif donnerait des billets gratuits (et Jèko
+  // refuse un encaissement sous 5 F).
   @IsNumber()
+  @Min(PRIX_BILLET_MIN)
+  @Max(PRIX_BILLET_MAX)
   prix: number;
 
   @IsOptional()

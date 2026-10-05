@@ -53,9 +53,15 @@ const REFERENCE_PAIEMENT = /^YEGO-P(\d+)-T\d+$/;
 // lieu d'en ouvrir une seconde, payable elle aussi.
 const DEMANDE_JEKO_VALIDE_MS = 25 * 60 * 1000;
 
+// Une même demande n'est pas réinterrogée chez Jèko plus d'une fois par
+// intervalle, quel que soit le nombre d'appels à /verifier (plusieurs onglets,
+// appareils, ou client abusif).
+const INTERVALLE_VERIFICATION_JEKO_MS = 4000;
+
 @Injectable()
 export class PaiementsService {
   private readonly logger = new Logger(PaiementsService.name);
+  private readonly derniereVerification = new Map<number, number>();
 
   constructor(
     private prisma: PrismaService,
@@ -546,7 +552,14 @@ export class PaiementsService {
 
   async verifierAupresDeJeko(reservationId: number, user: AuthenticatedUser) {
     const paiement = await this.findByReservation(reservationId, user);
-    if (this.jeko.estConfigure()) {
+    const derniere = this.derniereVerification.get(paiement.id) ?? 0;
+    if (
+      this.jeko.estConfigure() &&
+      paiement.statut === 'en_attente' &&
+      Date.now() - derniere >= INTERVALLE_VERIFICATION_JEKO_MS
+    ) {
+      this.derniereVerification.set(paiement.id, Date.now());
+      if (this.derniereVerification.size > 5000) this.derniereVerification.clear();
       try {
         await this.synchroniserAvecJeko(paiement);
       } catch (err) {

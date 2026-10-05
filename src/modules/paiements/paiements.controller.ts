@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  NotFoundException,
   Param,
   ParseIntPipe,
   Patch,
@@ -10,6 +11,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { WebhookSecretGuard } from '../../common/guards/webhook-secret.guard';
 import { PaymentSimulationGuard } from '../../common/guards/payment-simulation.guard';
@@ -19,6 +21,7 @@ import { PERMISSIONS } from '../../config/permissions';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AuthenticatedUser } from '../auth/strategies/jwt.strategy';
 import { PaiementsService } from './paiements.service';
+import { JekoService } from '../jeko/jeko.service';
 import { CreatePaiementDto } from './dto/create-paiement.dto';
 import { CreatePaiementGuichetDto } from './dto/create-paiement-guichet.dto';
 import { SimulerPaiementDto } from './dto/simuler-paiement.dto';
@@ -28,7 +31,10 @@ import { UpdatePaiementDto } from './dto/update-paiement.dto';
 // est appelé par un serveur tiers (pas de JWT) et utilise son propre guard.
 @Controller('paiements')
 export class PaiementsController {
-  constructor(private paiementsService: PaiementsService) {}
+  constructor(
+    private paiementsService: PaiementsService,
+    private jeko: JekoService,
+  ) {}
 
   @UseGuards(JwtAuthGuard)
   @Get()
@@ -87,18 +93,25 @@ export class PaiementsController {
     return this.paiementsService.encaisserAuGuichet(dto, user);
   }
 
-  // Appelé par le webhook de l'opérateur mobile money une fois le paiement
-  // confirmé : authentifié par secret partagé (PAYMENT_WEBHOOK_SECRET).
+  // Ancien webhook générique (secret partagé PAYMENT_WEBHOOK_SECRET). Il
+  // confirme un paiement sans aucune preuve d'encaissement : dès que Jèko est
+  // branché (webhook signé + réconciliation), il est coupé (404).
   @UseGuards(WebhookSecretGuard)
   @Patch('reservation/:reservationId/confirmer')
   confirmer(@Param('reservationId', ParseIntPipe) reservationId: number) {
+    if (this.jeko.estConfigure()) {
+      throw new NotFoundException();
+    }
     return this.paiementsService.confirmer(reservationId);
   }
 
   // Interroge Jèko sur le paiement en attente et applique son issue (payé /
   // échoué). À appeler au retour de la page opérateur ou depuis l'écran
   // d'attente USSD : le webhook reste la source principale.
+  // 12/min : l'app interroge toutes les 5 s ; au-delà, on protège le quota
+  // Jèko (500 req/min pour toute l'entreprise).
   @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 12, ttl: 60000 } })
   @Post('reservation/:reservationId/verifier')
   verifier(
     @CurrentUser() user: AuthenticatedUser,

@@ -1,6 +1,6 @@
 {
   "name": "yego-api",
-  "version": "0.28.0",
+  "version": "0.29.0",
   "description": "API back-end de la plateforme Yègo (réservation de tickets de transport)",
   "license": "UNLICENSED",
   "scripts": {
@@ -37,7 +37,7 @@
     "@nestjs/swagger": "^7.4.0",
     "@nestjs/throttler": "^5.2.0",
     "@prisma/client": "^5.19.0",
-    "bcrypt": "^5.1.1",
+    "bcrypt": "^6.0.0",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
     "express": "^4.21.0",
@@ -88,5 +88,8 @@
     ],
     "coverageDirectory": "../coverage",
     "testEnvironment": "node"
+  },
+  "overrides": {
+    "multer": "$multer"
   }
 }

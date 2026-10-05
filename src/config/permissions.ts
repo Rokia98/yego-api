@@ -19,7 +19,8 @@ export const PERMISSIONS = {
   VILLE_MANAGE: 'ville:manage',
   // Offre de transport
   TRAJET_MANAGE: 'trajet:manage',
-  DEPART_MANAGE: 'depart:manage',
+  DEPART_MANAGE: 'depart:manage', // créer / modifier / supprimer un départ
+  DEPART_OPERER: 'depart:operer', // terrain : démarrer, signaler un retard
   // Flotte (véhicules & chauffeurs)
   FLOTTE_READ: 'flotte:read',
   VEHICULE_MANAGE: 'vehicule:manage',
@@ -57,7 +58,7 @@ export const MATRICE_PERMISSIONS: Record<UserRole, Permission[] | typeof TOUTES>
   [UserRole.USER]: [PERMISSIONS.SUPPORT_CREATE],
 
   [UserRole.AGENT]: [
-    PERMISSIONS.DEPART_MANAGE,
+    PERMISSIONS.DEPART_OPERER,
     PERMISSIONS.FLOTTE_READ,
     PERMISSIONS.RESERVATION_GUICHET,
     PERMISSIONS.TICKET_VALIDATE,
@@ -69,6 +70,7 @@ export const MATRICE_PERMISSIONS: Record<UserRole, Permission[] | typeof TOUTES>
     PERMISSIONS.COMPAGNIE_UPDATE,
     PERMISSIONS.TRAJET_MANAGE,
     PERMISSIONS.DEPART_MANAGE,
+    PERMISSIONS.DEPART_OPERER,
     PERMISSIONS.FLOTTE_READ,
     PERMISSIONS.VEHICULE_MANAGE,
     PERMISSIONS.CHAUFFEUR_MANAGE,

@@ -343,6 +343,12 @@ describe('Intégration Jèko (e2e)', () => {
       expect(gestionnaire.body.chiffreAffaires.fraisService).toBeUndefined();
     });
 
+    it('ancien webhook à secret partagé coupé quand Jèko est actif (404)', () =>
+      http()
+        .patch(`/api/v1/paiements/reservation/${reservationId}/confirmer`)
+        .set('x-webhook-secret', process.env.PAYMENT_WEBHOOK_SECRET!)
+        .expect(404));
+
     it('événement non transactionnel → 200 ignoré', () =>
       webhook({ id: 'x', status: 'pending' }, { evenement: 'SERVICE_PROVIDER_LINK_REQUEST' }).expect(200));
   });
@@ -592,6 +598,27 @@ describe('Intégration Jèko (e2e)', () => {
         .set(auth('gestionnaire'))
         .send({ compagnieId: fx.compagnieId })
         .expect(403);
+
+      // Compte saisi par le gestionnaire il y a moins de 24 h : bloqué, et les
+      // admins ont été prévenus.
+      const apercuBloque = await http().get('/api/v1/reversements/apercu').set(auth('gestionnaire')).expect(200);
+      expect(apercuBloque.body.bloqueJusquA).toBeTruthy();
+      const bloque = await http()
+        .post('/api/v1/reversements')
+        .set(auth('admin'))
+        .send({ compagnieId: fx.compagnieId })
+        .expect(400);
+      expect(bloque.body.message).toMatch(/24 h/);
+      expect(
+        await prisma.notification.count({ where: { type: 'reversement.coordonnees_modifiees' } }),
+      ).toBeGreaterThanOrEqual(1);
+
+      // L'admin confirme le compte après vérification : délai levé.
+      await http()
+        .put(`/api/v1/reversements/coordonnees/${fx.compagnieId}`)
+        .set(auth('admin'))
+        .send({ moyen: 'wave', telephone: '+2250707070707' })
+        .expect(200);
 
       const res = await http()
         .post('/api/v1/reversements')

@@ -1,4 +1,5 @@
-import { IsInt, IsNumber, IsOptional, IsString } from 'class-validator';
+import { IsIn, IsInt, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
+import { PRIX_BILLET_MAX, PRIX_BILLET_MIN } from '../../../config/constants';
 
 export class UpdateTrajetDto {
   @IsOptional()
@@ -23,6 +24,8 @@ export class UpdateTrajetDto {
 
   @IsOptional()
   @IsNumber()
+  @Min(PRIX_BILLET_MIN)
+  @Max(PRIX_BILLET_MAX)
   prix?: number;
 
   @IsOptional()
@@ -30,6 +33,6 @@ export class UpdateTrajetDto {
   joursRecurrence?: string;
 
   @IsOptional()
-  @IsString()
+  @IsIn(['actif', 'inactif'])
   statut?: string;
 }

@@ -9,6 +9,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
+import { AutoriseMotDePasseTemporaire } from '../../common/decorators/mot-de-passe-temporaire.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AuthenticatedUser } from './strategies/jwt.strategy';
@@ -59,6 +60,7 @@ export class AuthController {
   // flag "mot de passe temporaire" et réémet un couple access/refresh —
   // pas besoin de se reconnecter après. Révoque les AUTRES sessions.
   @UseGuards(JwtAuthGuard)
+  @AutoriseMotDePasseTemporaire()
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @HttpCode(200)
   @Patch('mot-de-passe')
@@ -80,6 +82,7 @@ export class AuthController {
 
   // Révoque toutes les sessions et invalide les access tokens en cours.
   @UseGuards(JwtAuthGuard)
+  @AutoriseMotDePasseTemporaire()
   @HttpCode(200)
   @Post('logout-all')
   logoutAll(@CurrentUser() user: AuthenticatedUser) {

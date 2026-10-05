@@ -146,3 +146,7 @@ export const SUPPORT = {
   SUJET_MAX: 150,
   MESSAGE_MAX: 4000,
 } as const;
+
+// Bornes du prix d'un billet (FCFA).
+export const PRIX_BILLET_MIN = 100;
+export const PRIX_BILLET_MAX = 1_000_000;

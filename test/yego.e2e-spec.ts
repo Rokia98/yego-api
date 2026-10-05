@@ -481,6 +481,80 @@ describe('Yègo API (e2e)', () => {
   });
 
   // ---------------------------------------------------------------------------
+  describe('Audit sécurité 2026-10-05 (non-régression)', () => {
+    it('mot de passe temporaire : tout est bloqué (403) sauf le changement de mot de passe', async () => {
+      const cree = await http()
+        .post(`/api/v1/compagnies/${fx.autreCompagnieId}/compte-admin`)
+        .set(auth('admin'))
+        .send({ nom: 'Gérant Temporaire', telephone: '0788776655' })
+        .expect(201);
+      // Jeton signé directement (quota /auth/login déjà consommé par la suite).
+      const compte = await prisma.utilisateur.findUniqueOrThrow({
+        where: { telephone: '+2250788776655' },
+      });
+      const login = { body: { utilisateurId: compte.id } };
+      const jeton = {
+        Authorization: `Bearer ${app.get(JwtService).sign({
+          sub: compte.id,
+          telephone: compte.telephone,
+          role: compte.role,
+          cid: compte.compagnieId,
+          tv: compte.tokenVersion,
+          pwTmp: true,
+        })}`,
+      };
+
+      const bloque = await http().get('/api/v1/reservations').set(jeton).expect(403);
+      expect(bloque.body.code ?? bloque.body.message).toBeTruthy();
+      // Profil lisible (écran de changement de mot de passe).
+      await http().get(`/api/v1/utilisateurs/${login.body.utilisateurId}`).set(jeton).expect(200);
+
+      const change = await http()
+        .patch('/api/v1/auth/mot-de-passe')
+        .set(jeton)
+        .send({ ancienMotDePasse: cree.body.motDePasseTemporaire, nouveauMotDePasse: 'NouveauPass1!' })
+        .expect(200);
+      await http()
+        .get('/api/v1/reservations')
+        .set({ Authorization: `Bearer ${change.body.accessToken}` })
+        .expect(200);
+    });
+
+    it('PATCH /utilisateurs/:id refuse un mot de passe (400) : passer par /auth/mot-de-passe', () =>
+      http()
+        .patch(`/api/v1/utilisateurs/${uid.voyageur}`)
+        .set(auth('voyageur'))
+        .send({ motDePasse: 'PirateMotDePasse1' })
+        .expect(400));
+
+    it('trajet : prix nul ou négatif refusé (400), statut hors liste refusé (400)', async () => {
+      await http()
+        .patch(`/api/v1/trajets/${fx.trajetId}`)
+        .set(auth('gestionnaire'))
+        .send({ prix: 0 })
+        .expect(400);
+      await http()
+        .patch(`/api/v1/trajets/${fx.trajetId}`)
+        .set(auth('gestionnaire'))
+        .send({ statut: 'nimporte' })
+        .expect(400);
+    });
+
+    it('départ : statut hors liste refusé (400) ; un agent ne peut plus modifier un départ (403)', async () => {
+      await http()
+        .patch(`/api/v1/departs/${fx.departFuturId}`)
+        .set(auth('gestionnaire'))
+        .send({ statut: 'nimporte' })
+        .expect(400);
+      await http()
+        .patch(`/api/v1/departs/${fx.departFuturId}`)
+        .set(auth('agent'))
+        .send({ placesTotales: 60 })
+        .expect(403);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   describe('Parcours guichet complet', () => {
     let reservationId: number;
     let codeQr: string;
