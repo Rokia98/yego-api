@@ -15,8 +15,10 @@ services:
       retries: 5
     # Exposé sur l'hôte en 5434 (évite un conflit avec un Postgres local en 5432).
     # Accès depuis l'hôte : postgresql://yego:...@localhost:5434/yego
+    # Lié à 127.0.0.1 : joignable depuis cette machine (tests, Prisma Studio),
+    # pas depuis le reste du réseau local.
     ports:
-      - "${DB_HOST_PORT:-5434}:5432"
+      - "127.0.0.1:${DB_HOST_PORT:-5434}:5432"
 
   api:
     build:
@@ -43,7 +45,8 @@ services:
       # Clé Ed25519 (PEM) qui signe les QR pour la validation hors-ligne.
       # Vide = clé éphémère par démarrage (dev).
       TICKET_SIGNING_PRIVATE_KEY: ${TICKET_SIGNING_PRIVATE_KEY:-}
-      CORS_ORIGIN: ${CORS_ORIGIN:-*}
+      # Vide = aucun site web autorisé (les apps mobiles ne sont pas concernées).
+      CORS_ORIGIN: ${CORS_ORIGIN:-}
       SWAGGER_ENABLED: ${SWAGGER_ENABLED:-false}
       TRUST_PROXY: ${TRUST_PROXY:-0}
       SEED_ON_START: ${SEED_ON_START:-false}

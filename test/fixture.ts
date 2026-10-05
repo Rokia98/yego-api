@@ -12,6 +12,9 @@ export interface Fixture {
   departId: number;
   departFuturId: number;
   departBouakeId: number;
+  // Départ du jour (23:59, encore ouvert à la vente) : seuls les tickets du
+  // jour passent la validation à l'embarquement.
+  departAujourdhuiId: number;
   autreAgentId: number;
   comptes: {
     admin: { telephone: string; motDePasse: string };
@@ -136,6 +139,21 @@ export async function reinitialiser(prisma: PrismaService): Promise<Fixture> {
     data: { trajetId: trajet.id, dateDepart: hier, placesTotales: 50, placesDisponibles: 50, statut: 'planifie' },
   });
 
+  // Trajet du soir : un départ daté d'aujourd'hui reste vendable jusqu'à 23:59.
+  const trajetSoir = await prisma.trajet.create({
+    data: {
+      compagnieId: compagnie.id,
+      villeDepartId: korhogo.id,
+      villeArriveeId: bouake.id,
+      heureDepart: heure('23:59'),
+      prix: 6000,
+      statut: 'actif',
+    },
+  });
+  const departAujourdhui = await prisma.depart.create({
+    data: { trajetId: trajetSoir.id, dateDepart: new Date(), placesTotales: 50, placesDisponibles: 50, statut: 'planifie' },
+  });
+
   return {
     compagnieId: compagnie.id,
     autreCompagnieId: autre.id,
@@ -146,6 +164,7 @@ export async function reinitialiser(prisma: PrismaService): Promise<Fixture> {
     departId: departProche.id,
     departFuturId: departFutur.id,
     departBouakeId: departBouake.id,
+    departAujourdhuiId: departAujourdhui.id,
     autreAgentId: autreAgent.id,
     comptes: {
       admin: { telephone: '+2250700000001', motDePasse: MDP },

@@ -376,6 +376,17 @@ describe('Yègo API (e2e)', () => {
         .attach('document', Buffer.from('texte'), 'notes.txt')
         .expect(400));
 
+    it('upload : un fichier HTML déclaré PDF est refusé (400)', () =>
+      http()
+        .post(`/api/v1/compagnies/${fx.compagnieId}/documents`)
+        .set(auth('gestionnaire'))
+        .field('type', 'registre_commerce')
+        .attach('document', Buffer.from('<html><script>alert(1)</script></html>'), {
+          filename: 'piege.pdf',
+          contentType: 'application/pdf',
+        })
+        .expect(400));
+
     it("un agent (pas gestionnaire ni admin) ne peut pas uploader (403)", () =>
       http()
         .post(`/api/v1/compagnies/${fx.compagnieId}/documents`)
@@ -560,6 +571,43 @@ describe('Yègo API (e2e)', () => {
       ).toBe(0);
     });
 
+    it('embarquement : billet d’un autre jour ou d’un autre départ refusé', async () => {
+      const billet = async (departId: number) => {
+        const resa = await http()
+          .post('/api/v1/reservations/guichet')
+          .set(auth('agent'))
+          .send({ departId, nombrePlaces: 1, passager: { nom: 'Contrôle Date' }, paiementEspece: true })
+          .expect(201);
+        const t = await http()
+          .post(`/api/v1/tickets/reservation/${resa.body.id}`)
+          .set(auth('agent'))
+          .send({})
+          .expect(201);
+        return t.body.codeQr as string;
+      };
+
+      // Billet du mois prochain présenté aujourd'hui.
+      const futur = await billet(fx.departFuturId);
+      const r1 = await http().post(`/api/v1/tickets/valider/${futur}`).set(auth('agent')).expect(201);
+      expect(r1.body.valide).toBe(false);
+      expect(r1.body.message).toMatch(/départ du/);
+
+      // Billet du jour, mais l'agent embarque un autre car.
+      const duJour = await billet(fx.departAujourdhuiId);
+      const r2 = await http()
+        .post(`/api/v1/tickets/valider/${duJour}?departId=${fx.departBouakeId}`)
+        .set(auth('agent'))
+        .expect(201);
+      expect(r2.body).toEqual({ valide: false, message: "Ce ticket n'est pas pour ce départ" });
+      // Le bon car : validé.
+      const r3 = await http()
+        .post(`/api/v1/tickets/valider/${duJour}?departId=${fx.departAujourdhuiId}`)
+        .set(auth('agent'))
+        .expect(201);
+      expect(r3.body.valide).toBe(true);
+      await http().post(`/api/v1/tickets/valider/${duJour}?departId=abc`).set(auth('agent')).expect(400);
+    });
+
     it('départ : statut hors liste refusé (400) ; un agent ne peut plus modifier un départ (403)', async () => {
       await http()
         .patch(`/api/v1/departs/${fx.departFuturId}`)
@@ -584,7 +632,7 @@ describe('Yègo API (e2e)', () => {
         .post('/api/v1/reservations/guichet')
         .set(auth('agent'))
         .send({
-          departId: fx.departFuturId,
+          departId: fx.departAujourdhuiId,
           nombrePlaces: 2,
           passager: { nom: 'Awa Cisse', telephone: '+2250788887777' },
           paiementEspece: true,
@@ -1532,7 +1580,7 @@ describe('Yègo API (e2e)', () => {
       const resa = await http()
         .post('/api/v1/reservations')
         .set(auth('voyageur'))
-        .send({ departId: fx.departFuturId, nombrePlaces: 1, sieges: ['G1'] })
+        .send({ departId: fx.departAujourdhuiId, nombrePlaces: 1, sieges: ['G1'] })
         .expect(201);
       await http()
         .post('/api/v1/paiements')
@@ -1665,7 +1713,7 @@ describe('Yègo API (e2e)', () => {
       const resa = await http()
         .post('/api/v1/reservations')
         .set(auth('voyageur'))
-        .send({ departId: fx.departFuturId, nombrePlaces: 1 })
+        .send({ departId: fx.departAujourdhuiId, nombrePlaces: 1 })
         .expect(201);
       await http()
         .post('/api/v1/paiements')
@@ -1688,7 +1736,7 @@ describe('Yègo API (e2e)', () => {
 
     it('le manifeste du départ liste les tickets (agent)', () =>
       http()
-        .get(`/api/v1/tickets/depart/${fx.departFuturId}/manifeste`)
+        .get(`/api/v1/tickets/depart/${fx.departAujourdhuiId}/manifeste`)
         .set(auth('agent'))
         .expect(200)
         .then((r) => {

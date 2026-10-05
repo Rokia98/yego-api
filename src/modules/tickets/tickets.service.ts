@@ -30,6 +30,19 @@ export interface ActeurContexte {
   // Champs supplémentaires à joindre au journal d'audit (ex. horodatage du
   // scan hors-ligne lors d'une synchronisation).
   metaExtra?: Record<string, unknown>;
+  // Départ en cours d'embarquement (optionnel) : le ticket doit en être.
+  departId?: number;
+  // Instant du scan (sync hors-ligne) ; maintenant par défaut.
+  instant?: Date;
+}
+
+const JOUR_MS = 24 * 60 * 60 * 1000;
+// Un scan hors-ligne ne peut pas être antidaté au-delà (contrôle de date).
+const ANCIENNETE_MAX_SCAN_MS = 3 * JOUR_MS;
+
+// Jour (UTC, = heure d'Abidjan) d'un instant, en ms à minuit.
+function jourUtc(d: Date): number {
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
 }
 
 const RESERVATION_AVEC_COMPAGNIE = {
@@ -271,6 +284,25 @@ export class TicketsService {
       await journaliser('non_paye', ticket.id);
       return { valide: false, message: 'Paiement non confirmé ou remboursé' };
     }
+    // Le bon car : le départ scanné, s'il est indiqué par l'application.
+    if (ctx?.departId != null && ticket.reservation.departId !== ctx.departId) {
+      await journaliser('mauvais_depart', ticket.id);
+      return { valide: false, message: "Ce ticket n'est pas pour ce départ" };
+    }
+    // Le bon jour : le départ du ticket est aujourd'hui (ou hier, pour un car
+    // de nuit embarqué après minuit) — un billet du mois prochain ne passe pas.
+    const maintenant = Date.now();
+    const instant = Math.min(
+      maintenant,
+      Math.max(ctx?.instant?.getTime() ?? maintenant, maintenant - ANCIENNETE_MAX_SCAN_MS),
+    );
+    const jourScan = jourUtc(new Date(instant));
+    const jourDepart = jourUtc(ticket.reservation.depart.dateDepart);
+    if (jourDepart !== jourScan && jourDepart !== jourScan - JOUR_MS) {
+      await journaliser('mauvaise_date', ticket.id);
+      const date = ticket.reservation.depart.dateDepart.toISOString().slice(0, 10);
+      return { valide: false, message: `Ce ticket est pour le départ du ${date}` };
+    }
 
     // Conditionnel : deux scans simultanés ne peuvent pas valider tous les deux.
     const maj = await this.prisma.ticket.updateMany({
@@ -492,8 +524,10 @@ export class TicketsService {
       message: string;
     }[] = [];
     for (const scan of scans) {
+      const instant = scan.scanneA ? new Date(scan.scanneA) : undefined;
       const verdict = await this.valider(scan.codeQr, {
         ...ctx,
+        instant: instant && !Number.isNaN(instant.getTime()) ? instant : undefined,
         metaExtra: {
           source: 'sync_hors_ligne',
           scanneA: scan.scanneA ?? null,

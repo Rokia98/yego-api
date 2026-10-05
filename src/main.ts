@@ -38,8 +38,13 @@ async function bootstrap() {
   // CORS : liste blanche d'origines (CORS_ORIGIN, séparées par des virgules).
   // Les identifiants ne sont autorisés que si une liste explicite est fournie
   // (le couple origin:'*' + credentials:true est invalide côté navigateur).
+  // Absent = aucune origine navigateur autorisée (comme annoncé dans
+  // env.validation) ; '*' doit être demandé explicitement (dev uniquement,
+  // refusé en production). Les apps mobiles ne sont pas concernées par CORS.
   const corsOrigin = config.get<string>('CORS_ORIGIN')?.trim();
-  if (!corsOrigin || corsOrigin === '*') {
+  if (!corsOrigin) {
+    app.enableCors({ origin: false });
+  } else if (corsOrigin === '*') {
     app.enableCors({ origin: '*', credentials: false });
   } else {
     app.enableCors({
@@ -72,7 +77,7 @@ async function bootstrap() {
     const swaggerConfig = new DocumentBuilder()
       .setTitle('Yègo API')
       .setDescription('API de réservation de tickets de transport interurbain')
-      .setVersion(process.env.npm_package_version ?? '0.29.0')
+      .setVersion(process.env.npm_package_version ?? '0.29.1')
       .addBearerAuth()
       .build();
     const document = SwaggerModule.createDocument(app, swaggerConfig);

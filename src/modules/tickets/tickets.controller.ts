@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -123,17 +124,28 @@ export class TicketsController {
   // Scanné à l'embarquement : agents, gestionnaires de compagnie, admins.
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequirePermissions(PERMISSIONS.TICKET_VALIDATE)
+  // ?departId= (recommandé) : le départ en cours d'embarquement ; un ticket
+  // d'un autre départ est refusé. Sans lui, seule la date est contrôlée.
   @Post('valider/:codeQr')
   valider(
     @CurrentUser() user: AuthenticatedUser,
     @Param('codeQr') codeQr: string,
     @Ip() ip: string,
+    @Query('departId') departIdBrut?: string,
   ) {
+    let departId: number | undefined;
+    if (departIdBrut !== undefined && departIdBrut !== '') {
+      departId = Number(departIdBrut);
+      if (!Number.isInteger(departId) || departId <= 0) {
+        throw new BadRequestException('departId doit être un entier positif');
+      }
+    }
     return this.ticketsService.valider(codeQr, {
       userId: user.userId,
       role: user.role,
       compagnieId: user.compagnieId,
       ip,
+      departId,
     });
   }
 

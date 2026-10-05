@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
-import { DocumentsService } from './documents.service';
+import { DocumentsService, detecterType } from './documents.service';
 import { UserRole } from '../../config/constants';
 import { AuthenticatedUser } from '../auth/strategies/jwt.strategy';
 
@@ -31,9 +31,19 @@ const fichier = (overrides: Partial<Express.Multer.File> = {}): Express.Multer.F
     originalname: 'registre.pdf',
     mimetype: 'application/pdf',
     size: 1024,
-    buffer: Buffer.from('contenu'),
+    buffer: Buffer.from('%PDF-1.4 contenu'),
     ...overrides,
   }) as Express.Multer.File;
+
+describe('detecterType', () => {
+  it('reconnaît PDF, PNG et JPEG à leur signature, rien d’autre', () => {
+    expect(detecterType(Buffer.from('%PDF-1.7 ...'))).toBe('application/pdf');
+    expect(detecterType(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0]))).toBe('image/png');
+    expect(detecterType(Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0]))).toBe('image/jpeg');
+    expect(detecterType(Buffer.from('<html><script>alert(1)</script>'))).toBeNull();
+    expect(detecterType(undefined)).toBeNull();
+  });
+});
 
 describe('DocumentsService', () => {
   let prisma: any;

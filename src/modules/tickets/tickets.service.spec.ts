@@ -125,7 +125,7 @@ describe('TicketsService.valider — cloisonnement par compagnie', () => {
     reservation: {
       statut: 'confirmee',
       paiement: { statut: 'paye' },
-      depart: { trajet: { compagnieId: 1 } },
+      depart: { dateDepart: new Date(), trajet: { compagnieId: 1 } },
     },
   };
 
@@ -199,7 +199,7 @@ describe('TicketsService.valider — réservation et paiement', () => {
     reservation: {
       statut: 'confirmee',
       paiement: { statut: 'paye' },
-      depart: { trajet: { compagnieId: 1 } },
+      depart: { dateDepart: new Date(), trajet: { compagnieId: 1 } },
       ...reservation,
     },
   });

@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import * as admin from 'firebase-admin';
+import { App, cert, getApps, initializeApp } from 'firebase-admin/app';
+import { getMessaging } from 'firebase-admin/messaging';
 
 export interface PushMessage {
   tokens: string[];
@@ -24,7 +25,7 @@ export interface PushResultat {
 @Injectable()
 export class PushTransport implements OnModuleInit {
   private readonly logger = new Logger(PushTransport.name);
-  private app: admin.app.App | null = null;
+  private app: App | null = null;
 
   constructor(private config: ConfigService) {}
 
@@ -37,15 +38,10 @@ export class PushTransport implements OnModuleInit {
 
     if (projectId && clientEmail && privateKey) {
       this.app =
-        admin.apps.length > 0
-          ? admin.apps[0]!
-          : admin.initializeApp({
-              credential: admin.credential.cert({
-                projectId,
-                clientEmail,
-                privateKey,
-              }),
-            });
+        getApps()[0] ??
+        initializeApp({
+          credential: cert({ projectId, clientEmail, privateKey }),
+        });
       this.logger.log('Notifications push : transport FCM actif.');
     } else {
       this.logger.warn(
@@ -70,7 +66,7 @@ export class PushTransport implements OnModuleInit {
       return { envoyes: message.tokens.length, tokensInvalides: [] };
     }
 
-    const reponse = await admin.messaging(this.app).sendEachForMulticast({
+    const reponse = await getMessaging(this.app).sendEachForMulticast({
       tokens: message.tokens,
       notification: { title: message.titre, body: message.corps },
       data: message.donnees ?? {},

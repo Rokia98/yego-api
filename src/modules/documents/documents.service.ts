@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import { createReadStream, existsSync, writeFileSync } from 'fs';
-import { extname, join } from 'path';
+import { join } from 'path';
 import {
   BadRequestException,
   Injectable,
@@ -58,8 +58,18 @@ export class DocumentsService {
       );
     }
 
+    // Le type déclaré vient du client : on le recoupe avec la signature
+    // binaire du fichier (un .html renommé en .pdf est refusé).
+    const typeReel = detecterType(file.buffer);
+    if (typeReel !== file.mimetype) {
+      throw new BadRequestException(
+        'Le contenu du fichier ne correspond pas à un PDF, PNG ou JPEG valide',
+      );
+    }
+
     const dossier = dossierCompagnie(compagnieId);
-    const nomStockage = `${randomUUID()}${extname(file.originalname).toLowerCase()}`;
+    // Extension déduite du type vérifié, jamais du nom fourni par le client.
+    const nomStockage = `${randomUUID()}${EXTENSION_PAR_TYPE[typeReel]}`;
     const cheminFichier = join(dossier, nomStockage);
     writeFileSync(cheminFichier, file.buffer);
 
@@ -146,4 +156,21 @@ export class DocumentsService {
     }
     return doc;
   }
+}
+
+const EXTENSION_PAR_TYPE: Record<string, string> = {
+  'application/pdf': '.pdf',
+  'image/png': '.png',
+  'image/jpeg': '.jpg',
+};
+
+// Type d'après les premiers octets (« magic numbers »), null si inconnu.
+export function detecterType(buffer: Buffer | undefined): string | null {
+  if (!buffer || buffer.length < 4) return null;
+  if (buffer.subarray(0, 5).toString('latin1') === '%PDF-') return 'application/pdf';
+  if (buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
+    return 'image/png';
+  }
+  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'image/jpeg';
+  return null;
 }
