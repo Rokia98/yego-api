@@ -1,0 +1,83 @@
+# Blueprint Render — API Yègo (https://render.com/docs/blueprint-spec)
+#
+# Render → New → Blueprint → dépôt Rokia98/yego-api. Les variables marquées
+# `sync: false` sont des secrets : Render les demande à la création (ne jamais
+# les écrire ici). La base est sur Neon (us-east-2) : la région « ohio » est
+# la plus proche, sinon chaque requête SQL traverse l'Atlantique.
+services:
+  - type: web
+    name: yego-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    region: ohio
+    # Toujours allumée : les tâches planifiées (réconciliation Jèko toutes les
+    # 5 min, expiration des réservations, rappels) et le webhook Jèko doivent
+    # tourner en continu. L'offre gratuite s'endort après 15 min.
+    plan: starter
+    healthCheckPath: /api/v1/health
+    autoDeploy: true
+    # Documents des compagnies : le disque du conteneur est effacé à chaque
+    # déploiement, celui-ci est persistant.
+    disk:
+      name: uploads
+      mountPath: /app/uploads
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: UPLOADS_DIR
+        value: /app/uploads
+      # Render est derrière un proxy : IP réelle du visiteur (limitation de débit).
+      - key: TRUST_PROXY
+        value: "1"
+      - key: SWAGGER_ENABLED
+        value: "false"
+      - key: PAYMENT_SIMULATION
+        value: "false"
+      - key: SEED_ON_START
+        value: "false"
+      - key: JWT_EXPIRES_IN
+        value: 15m
+      - key: REFRESH_TOKEN_EXPIRES_DAYS
+        value: "30"
+      - key: RESERVATION_PAIEMENT_TTL_MINUTES
+        value: "30"
+      - key: FRAIS_SERVICE_POURCENT
+        value: "5"
+      - key: REVERSEMENT_COMMISSION_POURCENT
+        value: "0"
+      - key: APP_DEEP_LINK_PAIEMENT
+        value: yego://paiement
+      # ── Secrets (saisis dans le tableau de bord Render) ──────────────────
+      # Neon, connexion directe (« unpooled ») : les migrations Prisma
+      # s'appliquent au démarrage.
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: PAYMENT_WEBHOOK_SECRET
+        sync: false
+      - key: TICKET_SIGNING_PRIVATE_KEY
+        sync: false
+      # Origines autorisées du dashboard (obligatoire en production, jamais "*").
+      - key: CORS_ORIGIN
+        sync: false
+      - key: JEKO_API_KEY
+        sync: false
+      - key: JEKO_API_KEY_ID
+        sync: false
+      - key: JEKO_STORE_ID
+        sync: false
+      - key: JEKO_WEBHOOK_SECRET
+        sync: false
+      # https://<service>.onrender.com/api/v1/jeko/retour/succes | /echec
+      - key: JEKO_SUCCESS_URL
+        sync: false
+      - key: JEKO_ERROR_URL
+        sync: false
+      - key: FCM_PROJECT_ID
+        sync: false
+      - key: FCM_CLIENT_EMAIL
+        sync: false
+      - key: FCM_PRIVATE_KEY
+        sync: false

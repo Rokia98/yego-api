@@ -17,5 +17,12 @@ if [ "$SEED_ON_START" = "true" ] && [ -f dist/prisma/seed.js ]; then
   node dist/prisma/seed.js || echo "⚠️  Seed ignoré ou déjà appliqué."
 fi
 
+# Dossier des documents (disque persistant sur Render) : doit être inscriptible
+# par l'utilisateur « node », sinon les uploads échoueraient en silence.
+DOSSIER_UPLOADS="${UPLOADS_DIR:-/app/uploads}"
+if ! mkdir -p "$DOSSIER_UPLOADS" 2>/dev/null || [ ! -w "$DOSSIER_UPLOADS" ]; then
+  echo "⚠️  $DOSSIER_UPLOADS n'est pas inscriptible par $(id -un) : les documents ne pourront pas être enregistrés." >&2
+fi
+
 echo "→ Démarrage de l'API."
 exec "$@"

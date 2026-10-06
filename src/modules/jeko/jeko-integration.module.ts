@@ -1,5 +1,4 @@
 import { Module } from '@nestjs/common';
-import { PrismaService } from '../../prisma.service';
 import { PaiementsModule } from '../paiements/paiements.module';
 import { RemboursementsModule } from '../remboursements/remboursements.module';
 import { ReversementsModule } from '../reversements/reversements.module';
@@ -10,7 +9,7 @@ import { JekoWebhookService } from './jeko-webhook.service';
 // concerné (paiement, remboursement, reversement).
 @Module({
   imports: [PaiementsModule, RemboursementsModule, ReversementsModule],
-  providers: [JekoWebhookService, PrismaService],
+  providers: [JekoWebhookService],
   controllers: [JekoWebhookController],
 })
 export class JekoIntegrationModule {}

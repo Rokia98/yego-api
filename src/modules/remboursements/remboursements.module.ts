@@ -1,10 +1,9 @@
 import { Module } from '@nestjs/common';
-import { PrismaService } from '../../prisma.service';
 import { RemboursementsService } from './remboursements.service';
 import { RemboursementsController } from './remboursements.controller';
 
 @Module({
-  providers: [RemboursementsService, PrismaService],
+  providers: [RemboursementsService],
   controllers: [RemboursementsController],
   exports: [RemboursementsService],
 })

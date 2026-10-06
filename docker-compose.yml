@@ -34,7 +34,10 @@ services:
       NODE_ENV: ${NODE_ENV:-production}
       PORT: 3000
       # Communication inter-conteneurs : Postgres écoute toujours sur 5432 côté réseau Docker.
-      DATABASE_URL: postgresql://${POSTGRES_USER:-yego}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-yego}?schema=public
+      # API_DATABASE_URL (optionnel) : base hébergée (ex. Neon, connexion
+      # directe « unpooled » : les migrations Prisma s'y appliquent au
+      # démarrage). Vide = la base Postgres de ce compose.
+      DATABASE_URL: ${API_DATABASE_URL:-postgresql://${POSTGRES_USER:-yego}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-yego}?schema=public}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET requis}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-15m}
       REFRESH_TOKEN_EXPIRES_DAYS: ${REFRESH_TOKEN_EXPIRES_DAYS:-30}

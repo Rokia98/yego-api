@@ -21,6 +21,12 @@ for (const k of [
   'JEKO_ERROR_URL',
   'JEKO_API_URL',
   'REVERSEMENT_COMMISSION_POURCENT',
+  // Pas de vrai Firebase depuis les tests (push en mode journalisation).
+  'FCM_PROJECT_ID',
+  'FCM_CLIENT_EMAIL',
+  'FCM_PRIVATE_KEY',
+  // Base hébergée de l'API Docker : jamais utilisée par les tests.
+  'API_DATABASE_URL',
 ]) {
   process.env[k] = '';
 }

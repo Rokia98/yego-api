@@ -67,7 +67,9 @@
     "supertest": "^7.0.0",
     "ts-jest": "^29.2.0",
     "ts-node": "^10.9.2",
-    "typescript": "^5.5.0"
+    "typescript": "^5.5.0",
+    "@neon/config": "^1.8.3",
+    "@neon/env": "^1.5.0"
   },
   "jest": {
     "moduleFileExtensions": [

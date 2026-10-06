@@ -9,3 +9,4 @@ coverage/
 .DS_Store
 /uploads/
 /uploads-test/
+.neon

@@ -4,7 +4,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import { validate } from './config/env.validation';
-import { PrismaService } from './prisma.service';
+import { PrismaModule } from './prisma.module';
 import { HealthModule } from './modules/health/health.module';
 import { MaintenanceModule } from './modules/maintenance/maintenance.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
@@ -36,6 +36,8 @@ import { ReversementsModule } from './modules/reversements/reversements.module';
     // Charge .env et valide le schéma d'environnement au démarrage :
     // un secret manquant ou trop faible empêche le boot (voir env.validation.ts).
     ConfigModule.forRoot({ isGlobal: true, validate }),
+    // Client Prisma unique, partagé par tous les modules.
+    PrismaModule,
     // Tâches planifiées (expiration des réservations non payées).
     ScheduleModule.forRoot(),
     // Limite globale par défaut ; des limites plus strictes sont appliquées
@@ -68,9 +70,7 @@ import { ReversementsModule } from './modules/reversements/reversements.module';
     JekoIntegrationModule,
   ],
   providers: [
-    PrismaService,
     { provide: APP_GUARD, useClass: ThrottlerGuard },
   ],
-  exports: [PrismaService],
 })
 export class AppModule {}
