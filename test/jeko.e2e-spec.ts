@@ -24,6 +24,8 @@ const appels: Appel[] = [];
 const statuts = new Map<string, string>();
 // Prochaine réponse forcée pour un chemin POST (ex. erreur opérateur).
 const erreursForcees = new Map<string, { status: number; corps: unknown }>();
+// Solde du magasin renvoyé par GET stores/:id/balance (centimes).
+let soldeStubCentimes = 1_000_000_000;
 
 function demarrerStub(): Promise<Server> {
   const server = createServer((req, res) => {
@@ -85,7 +87,7 @@ function demarrerStub(): Promise<Server> {
         return repondre(200, { id, status: statuts.get(id) ?? 'pending' });
       }
       if (req.method === 'GET' && chemin.endsWith('/balance')) {
-        return repondre(200, { amount: { amount: 1_000_000_000, currency: 'XOF' } });
+        return repondre(200, { amount: { amount: soldeStubCentimes, currency: 'XOF' } });
       }
       repondre(404, { id: 'not_found' });
     });
@@ -208,14 +210,14 @@ describe('Intégration Jèko (e2e)', () => {
       });
       expect(res.body.urlPaiement).toMatch(/^https:\/\/webpay\.orange\.ci\//);
       expect(Number(res.body.montant)).toBe(30000);
-      expect(Number(res.body.fraisService)).toBe(1500);
+      expect(Number(res.body.fraisService)).toBe(1050);
 
       const appel = dernierAppel('POST', '/partner_api/payment_requests')!;
       expect(appel.entetes['x-api-key-id']).toBe('id-cle-e2e');
       expect(appel.corps).toMatchObject({
         storeId: 'store-e2e',
-        // 2 billets à 15 000 F + 5 % de frais de service = 31 500 F.
-        amountCents: 31_500 * 100,
+        // 2 billets à 15 000 F + 3,5 % de frais de service = 31 050 F.
+        amountCents: 31_050 * 100,
         currency: 'XOF',
         reference: referenceT1,
         paymentDetails: {
@@ -264,9 +266,9 @@ describe('Intégration Jèko (e2e)', () => {
       await http()
         .post('/api/v1/jeko/webhook')
         .set('Jeko-Event', 'TRANSACTION_COMPLETED')
-        .send(paiementReussi(referenceT1, 3_150_000))
+        .send(paiementReussi(referenceT1, 3_105_000))
         .expect(401);
-      await webhook(paiementReussi(referenceT1, 3_150_000), { signature: 'ab'.repeat(32) }).expect(401);
+      await webhook(paiementReussi(referenceT1, 3_105_000), { signature: 'ab'.repeat(32) }).expect(401);
       const p = await prisma.paiement.findUniqueOrThrow({ where: { id: paiementId } });
       expect(p.statut).toBe('en_attente');
     });
@@ -277,12 +279,12 @@ describe('Intégration Jèko (e2e)', () => {
       expect(p.statut).toBe('en_attente');
     });
 
-    it('GET /paiements/frais-service → 5 %', () =>
+    it('GET /paiements/frais-service → 3,5 %', () =>
       http()
         .get('/api/v1/paiements/frais-service')
         .set(auth('voyageur'))
         .expect(200)
-        .then((r) => expect(r.body).toEqual({ pourcent: 5 })));
+        .then((r) => expect(r.body).toEqual({ pourcent: 3.5 })));
 
     it('webhook au mauvais montant → ignoré (200) et audité', async () => {
       await webhook(paiementReussi(referenceT1, 100)).expect(200);
@@ -294,7 +296,7 @@ describe('Intégration Jèko (e2e)', () => {
     });
 
     it('la tentative T1 (Orange) payée → paiement "paye", moyen réel conservé', async () => {
-      const tx = paiementReussi(referenceT1, 3_150_000);
+      const tx = paiementReussi(referenceT1, 3_105_000);
       await webhook(tx).expect(200);
       const p = await prisma.paiement.findUniqueOrThrow({ where: { id: paiementId } });
       expect(p).toMatchObject({
@@ -315,7 +317,7 @@ describe('Intégration Jèko (e2e)', () => {
     });
 
     it('un second paiement sur une demande déjà soldée est audité (trop-perçu)', async () => {
-      await webhook(paiementReussi(`YEGO-P${paiementId}-T2`, 3_150_000)).expect(200);
+      await webhook(paiementReussi(`YEGO-P${paiementId}-T2`, 3_105_000)).expect(200);
       expect(
         await prisma.auditLog.count({ where: { action: 'paiement.jeko_doublon', entiteId: paiementId } }),
       ).toBe(1);
@@ -336,8 +338,8 @@ describe('Intégration Jèko (e2e)', () => {
 
     it('dashboard : frais de service encaissés visibles par l’admin seulement', async () => {
       const admin = await http().get('/api/v1/dashboard/resume').set(auth('admin')).expect(200);
-      // Paiement T1 confirmé : 2 billets → 1 500 F de frais.
-      expect(Number(admin.body.chiffreAffaires.fraisService)).toBe(1500);
+      // Paiement T1 confirmé : 2 billets → 1 050 F de frais.
+      expect(Number(admin.body.chiffreAffaires.fraisService)).toBe(1050);
       expect(Number(admin.body.chiffreAffaires.parStatutPaiement.paye.montant)).toBe(30000);
       const gestionnaire = await http().get('/api/v1/dashboard/resume').set(auth('gestionnaire')).expect(200);
       expect(gestionnaire.body.chiffreAffaires.fraisService).toBeUndefined();
@@ -420,7 +422,7 @@ describe('Intégration Jèko (e2e)', () => {
         .set(auth('voyageur'))
         .send({ reservationId, moyenPaiement: 'orange_money', telephonePayeur: '0701020304' })
         .expect(201);
-      await webhook(paiementReussi(pay.body.jekoReference, 1_575_000)).expect(200);
+      await webhook(paiementReussi(pay.body.jekoReference, 1_552_500)).expect(200);
       await http()
         .patch(`/api/v1/reservations/${reservationId}/annuler`)
         .set(auth('voyageur'))
@@ -432,10 +434,10 @@ describe('Intégration Jèko (e2e)', () => {
     it('confirmer → transfert Jèko vers le numéro payeur, puis "rembourse" au webhook', async () => {
       const { reservationId, remboursement } = await payerEnLigne();
       // Départ dans un mois : 10 % de frais retenus, calculés sur le billet.
-      // Les 750 F de frais de service payés en plus ne sont pas remboursés.
+      // Les 525 F de frais de service payés en plus ne sont pas remboursés.
       expect(remboursement.montantRembourse.toNumber()).toBe(13500);
       const paye = await prisma.paiement.findUniqueOrThrow({ where: { reservationId } });
-      expect(paye.fraisService.toNumber()).toBe(750);
+      expect(paye.fraisService.toNumber()).toBe(525);
 
       // La liste back-office expose le paiement d'origine (choix du bouton).
       const liste = await http()
@@ -592,50 +594,39 @@ describe('Intégration Jèko (e2e)', () => {
       expect(res.body.coordonnees).toEqual({ moyen: 'wave', telephone: '+2250707070707' });
     });
 
-    it('seul l’admin déclenche ; transfert du net vers le contact compagnie', async () => {
+    it('seul l’admin déclenche ; le net part vers le numéro de Yègo, puis remise en main propre', async () => {
       await http()
         .post('/api/v1/reversements')
         .set(auth('gestionnaire'))
-        .send({ compagnieId: fx.compagnieId })
+        .send({ compagnieId: fx.compagnieId, moyen: 'wave' })
         .expect(403);
-
-      // Compte saisi par le gestionnaire il y a moins de 24 h : bloqué, et les
-      // admins ont été prévenus.
-      const apercuBloque = await http().get('/api/v1/reversements/apercu').set(auth('gestionnaire')).expect(200);
-      expect(apercuBloque.body.bloqueJusquA).toBeTruthy();
-      const bloque = await http()
+      // Opérateur du numéro Yègo obligatoire : Wave ou Orange Money.
+      await http()
         .post('/api/v1/reversements')
         .set(auth('admin'))
         .send({ compagnieId: fx.compagnieId })
         .expect(400);
-      expect(bloque.body.message).toMatch(/24 h/);
-      expect(
-        await prisma.notification.count({ where: { type: 'reversement.coordonnees_modifiees' } }),
-      ).toBeGreaterThanOrEqual(1);
-
-      // L'admin confirme le compte après vérification : délai levé.
-      await http()
-        .put(`/api/v1/reversements/coordonnees/${fx.compagnieId}`)
-        .set(auth('admin'))
-        .send({ moyen: 'wave', telephone: '+2250707070707' })
-        .expect(200);
+      // Plus de délai de 24 h : la compagnie ne reçoit rien sur son compte.
+      const apercuLibre = await http().get('/api/v1/reversements/apercu').set(auth('gestionnaire')).expect(200);
+      expect(apercuLibre.body.bloqueJusquA).toBeNull();
 
       const res = await http()
         .post('/api/v1/reversements')
         .set(auth('admin'))
-        .send({ compagnieId: fx.compagnieId })
+        .send({ compagnieId: fx.compagnieId, moyen: 'wave' })
         .expect(201);
       expect(res.body).toMatchObject({
         statut: 'en_cours',
         nombrePaiements: 5,
         jekoReference: `YEGO-RV${res.body.id}`,
-        beneficiaire: '+2250707070707',
+        moyen: 'wave',
+        beneficiaire: '+2250798496595',
       });
       const t = dernierAppel('POST', '/partner_api/transfers')!;
       expect(t.corps).toMatchObject({ amountCents: 3_105_000, reference: `YEGO-RV${res.body.id}` });
       expect(dernierAppel('POST', '/partner_api/contacts')!.corps).toMatchObject({
-        name: 'Garantis Transport',
         paymentMethod: 'wave',
+        identifier: { number: '+2250798496595' },
       });
 
       // Plus rien d'éligible : les paiements sont verrouillés sur ce reversement.
@@ -644,16 +635,35 @@ describe('Intégration Jèko (e2e)', () => {
       await http()
         .post('/api/v1/reversements')
         .set(auth('admin'))
-        .send({ compagnieId: fx.compagnieId })
+        .send({ compagnieId: fx.compagnieId, moyen: 'wave' })
         .expect(400);
+
+      // Remise impossible tant que les fonds ne sont pas arrivés chez Yègo.
+      await http().post(`/api/v1/reversements/${res.body.id}/remise`).set(auth('admin')).send({}).expect(400);
 
       await webhook(transfert(`YEGO-RV${res.body.id}`, 'success')).expect(200);
       const detail = await http()
         .get(`/api/v1/reversements/${res.body.id}`)
         .set(auth('gestionnaire'))
         .expect(200);
-      expect(detail.body.statut).toBe('effectue');
+      expect(detail.body).toMatchObject({ statut: 'effectue', remisLe: null });
       expect(detail.body.paiements).toHaveLength(5);
+      expect(await prisma.notification.count({ where: { type: 'reversement.pret' } })).toBeGreaterThanOrEqual(1);
+
+      const aRemettre = await http().get('/api/v1/reversements?aRemettre=true').set(auth('admin')).expect(200);
+      expect(aRemettre.body.map((r: { id: number }) => r.id)).toEqual([res.body.id]);
+
+      // Remise : admin seulement, une seule fois, compagnie prévenue.
+      await http().post(`/api/v1/reversements/${res.body.id}/remise`).set(auth('gestionnaire')).send({}).expect(403);
+      const remis = await http()
+        .post(`/api/v1/reversements/${res.body.id}/remise`)
+        .set(auth('admin'))
+        .send({ note: 'Espèces remises au gérant, reçu n° 1' })
+        .expect(201);
+      expect(remis.body.remisLe).toBeTruthy();
+      expect(remis.body.remiseNote).toBe('Espèces remises au gérant, reçu n° 1');
+      await http().post(`/api/v1/reversements/${res.body.id}/remise`).set(auth('admin')).send({}).expect(409);
+      expect(await prisma.notification.count({ where: { type: 'reversement.remis' } })).toBeGreaterThanOrEqual(1);
     });
 
     it('transfert échoué → "echoue" et paiements libérés pour un prochain reversement', async () => {
@@ -661,7 +671,7 @@ describe('Intégration Jèko (e2e)', () => {
       const res = await http()
         .post('/api/v1/reversements')
         .set(auth('admin'))
-        .send({ compagnieId: fx.compagnieId })
+        .send({ compagnieId: fx.compagnieId, moyen: 'orange_money' })
         .expect(201);
       await webhook(transfert(`YEGO-RV${res.body.id}`, 'error')).expect(200);
 
@@ -669,6 +679,59 @@ describe('Intégration Jèko (e2e)', () => {
       expect(rev.statut).toBe('echoue');
       const apercu = await http().get('/api/v1/reversements/apercu').set(auth('gestionnaire')).expect(200);
       expect(apercu.body.nombrePaiements).toBe(1);
+    });
+
+    it('GET /dashboard/solde : disponible, en attente, déjà reversé', async () => {
+      // À ce stade : 1 reversement effectué (31 050 net), 1 échoué, et le
+      // paiement de 8 000 redevenu éligible.
+      const futur = await paiementPasse(12000);
+      await prisma.reservation.update({
+        where: { id: futur.reservationId },
+        data: { departId: fx.departFuturId },
+      });
+      const avant = await http().get('/api/v1/dashboard/solde').set(auth('gestionnaire')).expect(200);
+      expect(avant.body).toMatchObject({
+        compagnieId: fx.compagnieId,
+        commissionPourcent: 10,
+        disponible: { nombrePaiements: 1 },
+        enCoursDeReversement: { nombre: 0 },
+        totalReverse: { nombre: 1 },
+      });
+      expect(Number(avant.body.disponible.montantBrut)).toBe(8000);
+      expect(Number(avant.body.disponible.commission)).toBe(800);
+      expect(Number(avant.body.disponible.montantNet)).toBe(7200);
+      expect(Number(avant.body.totalReverse.montant)).toBe(31050);
+      expect(avant.body.dernierReversement.remisLe).toBeTruthy();
+      // Départ à venir : encaissé, pas encore reversable.
+      expect(avant.body.enAttente.nombrePaiements).toBeGreaterThanOrEqual(1);
+      expect(Number(avant.body.enAttente.montantBrut)).toBeGreaterThanOrEqual(12000);
+
+      // Le disponible suit l'aperçu du prochain reversement.
+      const apercu = await http().get('/api/v1/reversements/apercu').set(auth('gestionnaire')).expect(200);
+      expect(Number(apercu.body.montantNet)).toBe(7200);
+
+      // Admin : compagnieId requis ; agent : pas d'accès ; pas de solde d'autrui.
+      await http().get('/api/v1/dashboard/solde').set(auth('admin')).expect(403);
+      const admin = await http()
+        .get(`/api/v1/dashboard/solde?compagnieId=${fx.compagnieId}`)
+        .set(auth('admin'))
+        .expect(200);
+      expect(Number(admin.body.disponible.montantNet)).toBe(7200);
+      const autre = await http()
+        .get(`/api/v1/dashboard/solde?compagnieId=${fx.autreCompagnieId}`)
+        .set(auth('admin'))
+        .expect(200);
+      expect(Number(autre.body.disponible.montantBrut)).toBe(0);
+      expect(autre.body.dernierReversement).toBeNull();
+      await http()
+        .get(`/api/v1/dashboard/solde?compagnieId=${fx.autreCompagnieId}`)
+        .set(auth('gestionnaire'))
+        .expect(403);
+      await http().get('/api/v1/dashboard/solde').set(auth('agent')).expect(403);
+
+      // Remis sur le départ passé pour ne pas changer la suite (lot éligible).
+      await prisma.paiement.delete({ where: { id: futur.id } });
+      await prisma.reservation.delete({ where: { id: futur.reservationId } });
     });
 
     it('cloisonnement : l’autre compagnie ne voit pas ces reversements', async () => {
@@ -694,6 +757,214 @@ describe('Intégration Jèko (e2e)', () => {
         .set(auth('admin'))
         .send({ mode: 'jeko' })
         .expect(400);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  describe('Demande de reversement (compagnie → admin)', () => {
+    // État hérité : le paiement de 8 000 (net 7 200) est éligible, compte
+    // Wave de la compagnie confirmé par l'admin.
+    it('un agent ne peut pas demander ; le gestionnaire oui, une seule à la fois', async () => {
+      await http().post('/api/v1/reversements/demandes').set(auth('agent')).send({}).expect(403);
+      const d = await http()
+        .post('/api/v1/reversements/demandes')
+        .set(auth('gestionnaire'))
+        .send({ commentaire: 'Fin de semaine' })
+        .expect(201);
+      expect(d.body).toMatchObject({ statut: 'en_attente', compagnieId: fx.compagnieId });
+      expect(Number(d.body.montantNetEstime)).toBe(7200);
+      expect(
+        await prisma.notification.count({ where: { type: 'reversement.demande' } }),
+      ).toBeGreaterThanOrEqual(1);
+
+      await http().post('/api/v1/reversements/demandes').set(auth('gestionnaire')).send({}).expect(409);
+      const solde = await http().get('/api/v1/dashboard/solde').set(auth('gestionnaire')).expect(200);
+      expect(solde.body.demandeEnAttente.id).toBe(d.body.id);
+    });
+
+    it('rejet par l’admin seulement, avec motif ; puis annulation par la compagnie', async () => {
+      const [d] = (
+        await http().get('/api/v1/reversements/demandes?statut=en_attente').set(auth('admin')).expect(200)
+      ).body;
+      await http()
+        .post(`/api/v1/reversements/demandes/${d.id}/rejeter`)
+        .set(auth('gestionnaire'))
+        .send({ motif: 'non' })
+        .expect(403);
+      await http().post(`/api/v1/reversements/demandes/${d.id}/rejeter`).set(auth('admin')).send({}).expect(400);
+      const rej = await http()
+        .post(`/api/v1/reversements/demandes/${d.id}/rejeter`)
+        .set(auth('admin'))
+        .send({ motif: 'Vérification du compte en cours' })
+        .expect(201);
+      expect(rej.body).toMatchObject({ statut: 'rejetee', motifRejet: 'Vérification du compte en cours' });
+      await http()
+        .post(`/api/v1/reversements/demandes/${d.id}/approuver`)
+        .set(auth('admin'))
+        .send({ moyen: 'wave' })
+        .expect(409);
+
+      const d2 = await http().post('/api/v1/reversements/demandes').set(auth('gestionnaire')).send({}).expect(201);
+      const ann = await http()
+        .post(`/api/v1/reversements/demandes/${d2.body.id}/annuler`)
+        .set(auth('gestionnaire'))
+        .expect(201);
+      expect(ann.body.statut).toBe('annulee');
+    });
+
+    it('transfert refusé par Jèko → la demande repasse en attente', async () => {
+      const d = await http().post('/api/v1/reversements/demandes').set(auth('gestionnaire')).send({}).expect(201);
+      erreursForcees.set('/partner_api/transfers', {
+        status: 400,
+        corps: { id: 'third_party_payment_provider_error', message: 'please retry' },
+      });
+      const r = await http().post(`/api/v1/reversements/demandes/${d.body.id}/approuver`).set(auth('admin')).send({ moyen: 'wave' });
+      expect(r.status).toBeGreaterThanOrEqual(400);
+      const apres = await prisma.demandeReversement.findUniqueOrThrow({ where: { id: d.body.id } });
+      expect(apres).toMatchObject({ statut: 'en_attente', reversementId: null });
+      expect(
+        await prisma.notification.count({ where: { type: 'reversement.echoue' } }),
+      ).toBeGreaterThanOrEqual(1);
+    });
+
+    it('approbation → transfert Jèko du net vers la compagnie, prévenue à la réception', async () => {
+      const [d] = (
+        await http().get('/api/v1/reversements/demandes?statut=en_attente').set(auth('gestionnaire')).expect(200)
+      ).body;
+      const res = await http()
+        .post(`/api/v1/reversements/demandes/${d.id}/approuver`)
+        .set(auth('admin'))
+        .send({ moyen: 'wave' })
+        .expect(201);
+      expect(res.body).toMatchObject({
+        statut: 'approuvee',
+        reversement: { statut: 'en_cours', nombrePaiements: 1 },
+      });
+      const t = dernierAppel('POST', '/partner_api/transfers')!;
+      expect(t.corps).toMatchObject({ amountCents: 720_000, reference: `YEGO-RV${res.body.reversementId}` });
+      // Pas de « reçu » tant que Jèko n'a pas confirmé le transfert.
+      const recus = () => prisma.notification.count({ where: { type: 'reversement.pret' } });
+      const avant = await recus();
+      await webhook(transfert(`YEGO-RV${res.body.reversementId}`, 'success')).expect(200);
+      expect(await recus()).toBeGreaterThan(avant);
+      expect(dernierAppel('POST', '/partner_api/contacts')!.corps).toMatchObject({
+        identifier: { number: '+2250798496595' },
+      });
+
+      // Sur le dashboard de la compagnie : « à remettre » jusqu'à la remise.
+      const solde = async () =>
+        (await http().get('/api/v1/dashboard/solde').set(auth('gestionnaire')).expect(200)).body;
+      const s1 = await solde();
+      expect(s1.enCoursDeReversement.nombre).toBe(1);
+      expect(Number(s1.enCoursDeReversement.montant)).toBe(7200);
+      await http()
+        .post(`/api/v1/reversements/${res.body.reversementId}/remise`)
+        .set(auth('admin'))
+        .send({})
+        .expect(201);
+      const s2 = await solde();
+      expect(s2.enCoursDeReversement.nombre).toBe(0);
+      expect(Number(s2.totalReverse.montant)).toBe(31050 + 7200);
+
+      // Plus rien à demander tant que de nouveaux billets ne sont pas éligibles.
+      await http().post('/api/v1/reversements/demandes').set(auth('gestionnaire')).send({}).expect(400);
+      // La compagnie ne voit que ses demandes.
+      const liste = await http().get('/api/v1/reversements/demandes').set(auth('gestionnaire')).expect(200);
+      expect(liste.body.every((x: { compagnieId: number }) => x.compagnieId === fx.compagnieId)).toBe(true);
+      expect(liste.body).toHaveLength(3);
+      expect(liste.body.map((x: { statut: string }) => x.statut).sort()).toEqual([
+        'annulee',
+        'approuvee',
+        'rejetee',
+      ]);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  describe('Retrait de la part Yègo', () => {
+    const apercu = async () =>
+      (await http().get('/api/v1/retraits/apercu').set(auth('admin')).expect(200)).body;
+
+    it('réservé à l’admin plateforme', async () => {
+      // (POST /retraits limité à 5 appels/min : les tests suivants en font 5.)
+      await http().get('/api/v1/retraits/apercu').set(auth('gestionnaire')).expect(403);
+      await http().get('/api/v1/retraits').set(auth('gestionnaire')).expect(403);
+    });
+
+    it('retirable = solde Jèko − argent des compagnies et voyageurs', async () => {
+      const a = await apercu();
+      // Solde réglé à engagements + 50 000 : seuls 50 000 sont à Yègo, frais
+      // Jèko du retrait (1,5 %) compris : 49 261 + 739 = 50 000.
+      soldeStubCentimes = (Number(a.engagements.total) + 50_000) * 100;
+      const b = await apercu();
+      expect(Number(b.retirable)).toBe(49_261);
+      expect(b.fraisTransfertPourcent).toBe(1.5);
+      // Frais des transferts à venir réservés sur l'argent des compagnies.
+      expect(Number(b.engagements.fraisTransfertsAVenir)).toBe(
+        Math.ceil(
+          ((Number(b.engagements.billetsNonReverses) +
+            Number(b.engagements.fraisRetenusNonReverses)) *
+            1.5) /
+            100,
+        ),
+      );
+      expect(b.beneficiaire).toBe('+2250798496595');
+      expect(b.moyens).toEqual(['wave', 'orange_money']);
+      expect(Number(b.engagements.reversementsEnCours)).toBe(0);
+    });
+
+    it('mot de passe exigé, montant borné au retirable, opérateur Wave/Orange seulement', async () => {
+      await http()
+        .post('/api/v1/retraits')
+        .set(auth('admin'))
+        .send({ montant: 30_000, moyen: 'wave', motDePasse: 'mauvais' })
+        .expect(403);
+      await http()
+        .post('/api/v1/retraits')
+        .set(auth('admin'))
+        .send({ montant: 60_000, moyen: 'wave', motDePasse: fx.comptes.admin.motDePasse })
+        .expect(400);
+      await http()
+        .post('/api/v1/retraits')
+        .set(auth('admin'))
+        .send({ montant: 30_000, moyen: 'mtn_money', motDePasse: fx.comptes.admin.motDePasse })
+        .expect(400);
+    });
+
+    it('retrait vers le numéro Yègo, puis soldé par la réconciliation', async () => {
+      const res = await http()
+        .post('/api/v1/retraits')
+        .set(auth('admin'))
+        .send({ montant: 30_000, moyen: 'orange_money', motDePasse: fx.comptes.admin.motDePasse })
+        .expect(201);
+      expect(res.body).toMatchObject({
+        statut: 'en_cours',
+        beneficiaire: '+2250798496595',
+        jekoReference: `YEGO-RT${res.body.id}`,
+      });
+      expect(dernierAppel('POST', '/partner_api/contacts')!.corps).toMatchObject({
+        paymentMethod: 'orange',
+        identifier: { number: '+2250798496595' },
+      });
+      expect(dernierAppel('POST', '/partner_api/transfers')!.corps).toMatchObject({
+        amountCents: 3_000_000,
+        reference: `YEGO-RT${res.body.id}`,
+      });
+
+      // Un seul retrait à la fois ; celui en cours est déduit du retirable.
+      await http()
+        .post('/api/v1/retraits')
+        .set(auth('admin'))
+        .send({ montant: 1000, moyen: 'wave', motDePasse: fx.comptes.admin.motDePasse })
+        .expect(409);
+      expect(Number((await apercu()).retirable)).toBe(19_704);
+
+      statuts.set(res.body.jekoTransferId, 'success');
+      const bilan = await app.get(JekoWebhookService).reconcilier();
+      expect(bilan.retraits).toBe(1);
+      const liste = await http().get('/api/v1/retraits').set(auth('admin')).expect(200);
+      expect(liste.body[0]).toMatchObject({ id: res.body.id, statut: 'effectue' });
+      expect(Number((await apercu()).dejaRetire)).toBe(30_000);
     });
   });
 });

@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -12,9 +13,9 @@ import { AuditService } from '../audit/audit.service';
 import { AuthenticatedUser } from '../auth/strategies/jwt.strategy';
 import { assertCompagnieScope } from '../../common/scope';
 import { paginer } from '../../common/pagination';
-import { versMoyenJeko } from '../../common/moyens-paiement';
+import { MoyenEncaissementYego, versMoyenJeko } from '../../common/moyens-paiement';
 import { UserRole } from '../../config/constants';
-import { NotificationsService } from '../notifications/notifications.service';
+import { Notif, NotificationsService } from '../notifications/notifications.service';
 import {
   JekoService,
   StatutJeko,
@@ -31,10 +32,10 @@ const PLAFOND_TRANSFERT_FCFA = 2_000_000;
 const MINIMUM_TRANSFERT_FCFA: Record<string, number> = { moov_money: 100 };
 const MINIMUM_PAR_DEFAUT_FCFA = 5;
 
-// Délai de sécurité après un changement de compte de reversement fait par la
-// compagnie : un compte gestionnaire piraté ne peut pas détourner tout de
-// suite les fonds ; les admins sont prévenus et peuvent confirmer avant.
-const DELAI_SECURITE_COORDONNEES_MS = 24 * 60 * 60 * 1000;
+// Clés de verrou PostgreSQL (pg_advisory_xact_lock) : une par compagnie pour
+// les demandes, une globale pour les retraits Yègo.
+const VERROU_DEMANDE = 1_000_000_000;
+export const VERROU_RETRAIT = 2_000_000_000;
 
 export interface ActeurContexte {
   userId: number;
@@ -52,8 +53,9 @@ interface Lot {
 
 /**
  * Reversement aux compagnies des billets payés en ligne : Yègo encaisse sur
- * son magasin Jèko, puis transfère à chaque compagnie (contact Mobile Money)
- * la part qui lui revient.
+ * son magasin Jèko. La compagnie demande son reversement ; l'admin valide, ce
+ * qui transfère sa part du magasin Jèko vers le numéro Wave / Orange Money de
+ * Yègo ; l'admin la remet ensuite en main propre à la compagnie (marquerRemis).
  *
  * Paiements éligibles (encaissés via Jèko, pas encore reversés) :
  * - 'paye' sur une réservation confirmée dont le départ est passé (veille ou
@@ -91,37 +93,144 @@ export class ReversementsService {
       // true : il reste des paiements éligibles au-delà de ce lot.
       plafondAtteint: lot.plafondAtteint,
       reversementsEnCours: enCours,
-      // Délai de sécurité en cours après un changement de compte par la
-      // compagnie (null = reversement possible).
-      bloqueJusquA: this.finDelaiSecurite(compagnie.reversementCoordonneesModifieesLe),
+      // Plus de délai de sécurité : les fonds partent vers le numéro de Yègo,
+      // pas vers un compte que la compagnie peut modifier. Gardé pour les
+      // clients existants.
+      bloqueJusquA: null,
+    };
+  }
+
+  // Solde de la compagnie chez Yègo (ventes en ligne encaissées via Jèko) :
+  // - disponible : reversable dès maintenant (mêmes règles que l'aperçu, sans
+  //   le plafond par transfert) ;
+  // - enAttente : encaissé mais pas encore reversable (départ à venir, ou
+  //   remboursement non soldé dont seuls les frais retenus reviendront) ;
+  // - enCoursDeReversement : transferts lancés, pas encore confirmés ;
+  // - totalReverse : cumul des reversements effectués.
+  // Les ventes au guichet n'y figurent pas : la compagnie les encaisse elle-même.
+  async soldeCompagnie(compagnieId: number, user: AuthenticatedUser) {
+    assertCompagnieScope(user, compagnieId);
+    await this.compagnieOu404(compagnieId);
+    const debutDuJour = this.debutDuJour();
+
+    const [paiements, [aRemettre, remis], dernier, demandeEnAttente] = await Promise.all([
+      this.prisma.paiement.findMany({
+        where: {
+          reversementId: null,
+          jekoReference: { not: null },
+          statut: { in: ['paye', 'rembourse'] },
+          reservation: { depart: { trajet: { compagnieId } } },
+        },
+        select: {
+          statut: true,
+          montant: true,
+          reservation: {
+            select: {
+              statut: true,
+              depart: { select: { dateDepart: true } },
+              remboursement: { select: { statut: true, fraisRetenus: true } },
+            },
+          },
+        },
+      }),
+      Promise.all([
+        // Validés par Yègo mais pas encore remis en main propre.
+        this.prisma.reversement.aggregate({
+          where: {
+            compagnieId,
+            OR: [{ statut: 'en_cours' }, { statut: 'effectue', remisLe: null }],
+          },
+          _sum: { montantNet: true },
+          _count: { _all: true },
+        }),
+        this.prisma.reversement.aggregate({
+          where: { compagnieId, statut: 'effectue', remisLe: { not: null } },
+          _sum: { montantNet: true },
+          _count: { _all: true },
+        }),
+      ]),
+      this.prisma.reversement.findFirst({
+        where: { compagnieId, remisLe: { not: null } },
+        orderBy: { remisLe: 'desc' },
+        select: { id: true, montantNet: true, remisLe: true },
+      }),
+      this.prisma.demandeReversement.findFirst({
+        where: { compagnieId, statut: 'en_attente' },
+        select: { id: true, montantNetEstime: true, dateDemande: true },
+      }),
+    ]);
+
+    const zero = new Prisma.Decimal(0);
+    const disponible = { nombre: 0, brut: zero };
+    const enAttente = { nombre: 0, brut: zero };
+    for (const p of paiements) {
+      const r = p.reservation;
+      const frais = r.remboursement?.fraisRetenus ?? zero;
+      let cible: typeof disponible | null = null;
+      let part = zero;
+      if (p.statut === 'paye' && r.statut === 'confirmee') {
+        cible = r.depart.dateDepart < debutDuJour ? disponible : enAttente;
+        part = p.montant;
+      } else if (p.statut === 'rembourse' && r.remboursement?.statut === 'rembourse') {
+        cible = disponible;
+        part = frais;
+      } else if (p.statut === 'paye' && r.remboursement) {
+        cible = enAttente;
+        part = frais;
+      }
+      if (!cible) continue;
+      cible.nombre += 1;
+      cible.brut = cible.brut.plus(part);
+    }
+
+    const detail = (b: { nombre: number; brut: Prisma.Decimal }) => {
+      const commission = this.commissionSur(b.brut);
+      return {
+        nombrePaiements: b.nombre,
+        montantBrut: b.brut,
+        commission,
+        montantNet: b.brut.minus(commission),
+      };
+    };
+    const reversements = (a: typeof remis) => ({
+      nombre: a._count._all,
+      montant: a._sum.montantNet ?? zero,
+    });
+
+    return {
+      compagnieId,
+      devise: 'XOF',
+      commissionPourcent: this.commissionPourcent(),
+      disponible: detail(disponible),
+      enAttente: detail(enAttente),
+      // Validé par Yègo, en attente de remise en main propre.
+      enCoursDeReversement: reversements(aRemettre),
+      // Effectivement remis à la compagnie.
+      totalReverse: reversements(remis),
+      dernierReversement: dernier,
+      // Demande faite par la compagnie, pas encore traitée par Yègo (ou null).
+      demandeEnAttente,
     };
   }
 
   // Déclenché par l'admin plateforme : verrouille le lot de paiements (un
   // paiement ne peut appartenir qu'à un reversement), puis ordonne le
   // transfert Jèko. Le résultat arrive par webhook ou réconciliation.
-  async creer(compagnieId: number, ctx: ActeurContexte) {
+  // Le transfert Jèko part vers le numéro Wave / Orange Money de Yègo
+  // (RETRAIT_YEGO_TELEPHONE), jamais vers la compagnie : l'admin lui remet
+  // ensuite l'argent en main propre, puis le déclare (marquerRemis).
+  async creer(compagnieId: number, moyen: MoyenEncaissementYego, ctx: ActeurContexte) {
     if (!this.jeko.estConfigure()) {
       throw new BadRequestException('Jèko n’est pas configuré sur cette API');
     }
+    const telephone = this.config.get<string>('RETRAIT_YEGO_TELEPHONE');
+    if (!telephone) {
+      throw new BadRequestException(
+        'Numéro Mobile Money de Yègo non configuré (RETRAIT_YEGO_TELEPHONE)',
+      );
+    }
+    const moyenJeko = versMoyenJeko(moyen)!;
     const compagnie = await this.compagnieOu404(compagnieId);
-    const moyen = compagnie.reversementMoyen;
-    const telephone = compagnie.reversementTelephone;
-    const moyenJeko = moyen ? versMoyenJeko(moyen) : null;
-    if (!moyen || !moyenJeko || !telephone) {
-      throw new BadRequestException(
-        'La compagnie n’a pas renseigné son compte Mobile Money de reversement',
-      );
-    }
-
-    const modifieesLe = compagnie.reversementCoordonneesModifieesLe;
-    if (modifieesLe && Date.now() - modifieesLe.getTime() < DELAI_SECURITE_COORDONNEES_MS) {
-      const libre = new Date(modifieesLe.getTime() + DELAI_SECURITE_COORDONNEES_MS);
-      throw new BadRequestException(
-        `Compte de reversement modifié par la compagnie il y a moins de 24 h : reversement bloqué jusqu'au ${libre.toISOString()}. ` +
-          'Après vérification auprès de la compagnie, un admin peut lever le délai en réenregistrant les coordonnées (PUT /reversements/coordonnees/:id).',
-      );
-    }
 
     const lot = await this.calculerLot(compagnieId);
     if (lot.paiementIds.length === 0) {
@@ -132,9 +241,11 @@ export class ReversementsService {
 
     if (aTransferer) {
       const solde = await this.lireSoldeOuNull();
-      if (solde != null && lot.montantNet.greaterThan(solde)) {
+      // Jèko débite le montant + ses frais de transfert.
+      const aDebiter = lot.montantNet.plus(this.jeko.fraisTransfertFcfa(lot.montantNet));
+      if (solde != null && aDebiter.greaterThan(solde)) {
         throw new BadRequestException(
-          `Solde Jèko insuffisant (${solde} FCFA disponibles pour ${lot.montantNet} FCFA à reverser)`,
+          `Solde Jèko insuffisant (${solde} FCFA disponibles pour ${aDebiter} FCFA à débiter, frais Jèko compris)`,
         );
       }
     }
@@ -152,7 +263,10 @@ export class ReversementsService {
           creeParId: ctx.userId,
           // Lot entièrement absorbé par la commission (ou sous le minimum
           // opérateur) : rien à transférer, il est soldé tout de suite.
-          ...(aTransferer ? {} : { statut: 'effectue', dateEffectue: new Date() }),
+          // (rien à remettre non plus).
+          ...(aTransferer
+            ? {}
+            : { statut: 'effectue', dateEffectue: new Date(), remisLe: new Date() }),
         },
       });
       const verrou = await tx.paiement.updateMany({
@@ -164,6 +278,17 @@ export class ReversementsService {
           'Des paiements viennent d’être reversés par ailleurs, relancez l’aperçu',
         );
       }
+      // Ce reversement honore la demande en attente de la compagnie, qu'il
+      // soit lancé depuis la demande ou directement par l'admin.
+      await tx.demandeReversement.updateMany({
+        where: { compagnieId, statut: 'en_attente' },
+        data: {
+          statut: 'approuvee',
+          reversementId: rev.id,
+          traiteParId: ctx.userId,
+          dateTraitement: new Date(),
+        },
+      });
       return tx.reversement.update({
         where: { id: rev.id },
         data: { jekoReference: `YEGO-RV${rev.id}` },
@@ -192,7 +317,7 @@ export class ReversementsService {
 
     let transfert;
     try {
-      const contactId = await this.contactJeko(compagnie.id, compagnie.nom, moyenJeko, telephone, compagnie.jekoContactId);
+      const contactId = await this.jeko.creerContact({ nom: 'Yègo', moyen: moyenJeko, telephone });
       transfert = await this.jeko.creerTransfert({
         contactId,
         montantFcfa: lot.montantNet.toNumber(),
@@ -218,6 +343,195 @@ export class ReversementsService {
       });
     }
     return this.prisma.reversement.findUniqueOrThrow({ where: { id: reversement.id } });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Demandes de reversement : la compagnie demande, l'admin approuve (ce qui
+  // lance creer()) ou rejette.
+
+  async demander(user: AuthenticatedUser, commentaire: string | undefined, ip?: string) {
+    const compagnieId = user.compagnieId;
+    if (compagnieId == null) {
+      throw new ForbiddenException("Votre compte n'est rattaché à aucune compagnie");
+    }
+    const compagnie = await this.compagnieOu404(compagnieId);
+    const lot = await this.calculerLot(compagnieId);
+    if (lot.paiementIds.length === 0 || lot.montantNet.lessThanOrEqualTo(0)) {
+      throw new BadRequestException('Aucun montant disponible à reverser pour le moment');
+    }
+    // Verrou par compagnie : deux clics simultanés ne créent pas deux
+    // demandes en attente.
+    const demande = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(${VERROU_DEMANDE + compagnieId})::text`;
+      const enAttente = await tx.demandeReversement.findFirst({
+        where: { compagnieId, statut: 'en_attente' },
+        select: { id: true },
+      });
+      if (enAttente) {
+        throw new ConflictException(
+          `Une demande de reversement est déjà en attente (#${enAttente.id})`,
+        );
+      }
+      return tx.demandeReversement.create({
+        data: {
+          compagnieId,
+          montantNetEstime: lot.montantNet,
+          commentaire,
+          demandeParId: user.userId,
+        },
+      });
+    });
+
+    const admins = await this.prisma.utilisateur.findMany({
+      where: { role: UserRole.ADMIN, actif: true },
+      select: { id: true },
+    });
+    for (const a of admins) {
+      await this.notifications.notifier(a.id, {
+        type: 'reversement.demande',
+        titre: 'Demande de reversement',
+        corps: `${compagnie.nom} demande le reversement de ${lot.montantNet} FCFA.`,
+        donnees: { compagnieId, demandeId: demande.id },
+      });
+    }
+    await this.audit.record({
+      action: 'reversement.demande',
+      entite: 'demande_reversement',
+      entiteId: demande.id,
+      acteurId: user.userId,
+      acteurRole: user.role,
+      ip,
+      metadata: { compagnieId, montantNetEstime: lot.montantNet.toString() },
+    });
+    return demande;
+  }
+
+  listerDemandes(
+    user: AuthenticatedUser,
+    filtres: { compagnieId?: number; statut?: string; skip?: number; take?: number },
+  ) {
+    const where: Prisma.DemandeReversementWhereInput = {};
+    if (user.role === UserRole.ADMIN) {
+      if (filtres.compagnieId) where.compagnieId = filtres.compagnieId;
+    } else {
+      if (user.compagnieId == null) return [];
+      if (filtres.compagnieId) assertCompagnieScope(user, filtres.compagnieId);
+      where.compagnieId = user.compagnieId;
+    }
+    if (filtres.statut) where.statut = filtres.statut;
+    return this.prisma.demandeReversement.findMany({
+      where,
+      ...paginer(filtres.skip ?? 0, filtres.take ?? 20),
+      include: {
+        compagnie: { select: { id: true, nom: true } },
+        reversement: { select: { id: true, statut: true, montantNet: true, dateEffectue: true } },
+      },
+      orderBy: { dateDemande: 'desc' },
+    });
+  }
+
+  // Approbation par l'admin : transfert Jèko du lot éligible (montant
+  // recalculé à cet instant) vers le numéro de Yègo. Si le transfert ne peut
+  // pas partir (solde Jèko, opérateur…), la demande reste en attente.
+  async approuverDemande(id: number, moyen: MoyenEncaissementYego, ctx: ActeurContexte) {
+    const demande = await this.demandeEnAttente(id);
+    await this.creer(demande.compagnieId, moyen, ctx);
+    return this.prisma.demandeReversement.findUniqueOrThrow({
+      where: { id },
+      include: { reversement: true },
+    });
+  }
+
+  async rejeterDemande(id: number, motif: string, ctx: ActeurContexte) {
+    const demande = await this.demandeEnAttente(id);
+    const maj = await this.prisma.demandeReversement.update({
+      where: { id },
+      data: {
+        statut: 'rejetee',
+        motifRejet: motif,
+        traiteParId: ctx.userId,
+        dateTraitement: new Date(),
+      },
+    });
+    await this.notifierGestionnaires(demande.compagnieId, {
+      type: 'reversement.rejete',
+      titre: 'Demande de reversement rejetée',
+      corps: motif,
+      donnees: { compagnieId: demande.compagnieId, demandeId: id },
+    });
+    await this.audit.record({
+      action: 'reversement.demande_rejetee',
+      entite: 'demande_reversement',
+      entiteId: id,
+      acteurId: ctx.userId,
+      acteurRole: ctx.role,
+      ip: ctx.ip,
+      metadata: { compagnieId: demande.compagnieId, motif },
+    });
+    return maj;
+  }
+
+  // La compagnie retire sa propre demande tant qu'elle n'est pas traitée.
+  async annulerDemande(id: number, user: AuthenticatedUser) {
+    const demande = await this.demandeEnAttente(id);
+    assertCompagnieScope(user, demande.compagnieId);
+    return this.prisma.demandeReversement.update({
+      where: { id },
+      data: { statut: 'annulee', traiteParId: user.userId, dateTraitement: new Date() },
+    });
+  }
+
+  // L'admin déclare avoir remis l'argent à la compagnie (en main propre, hors
+  // système). Seulement une fois les fonds arrivés sur le numéro de Yègo :
+  // un transfert encore en cours peut échouer et libérer les paiements.
+  async marquerRemis(id: number, note: string | undefined, ctx: ActeurContexte) {
+    const rev = await this.prisma.reversement.findUnique({ where: { id } });
+    if (!rev) throw new NotFoundException(`Reversement ${id} introuvable`);
+    if (rev.remisLe) throw new ConflictException('Reversement déjà remis à la compagnie');
+    if (rev.statut !== 'effectue') {
+      throw new BadRequestException(
+        `Les fonds ne sont pas encore arrivés sur le numéro de Yègo (statut ${rev.statut})`,
+      );
+    }
+    const verrou = await this.prisma.reversement.updateMany({
+      where: { id, remisLe: null },
+      data: { remisLe: new Date(), remisParId: ctx.userId, remiseNote: note },
+    });
+    if (verrou.count === 0) throw new ConflictException('Reversement déjà remis à la compagnie');
+
+    await this.notifierGestionnaires(rev.compagnieId, {
+      type: 'reversement.remis',
+      titre: 'Reversement remis',
+      corps: `Yègo vous a remis ${rev.montantNet} FCFA.`,
+      donnees: { compagnieId: rev.compagnieId, reversementId: id },
+    });
+    await this.audit.record({
+      action: 'reversement.remis',
+      entite: 'reversement',
+      entiteId: id,
+      acteurId: ctx.userId,
+      acteurRole: ctx.role,
+      ip: ctx.ip,
+      metadata: { compagnieId: rev.compagnieId, montantNet: rev.montantNet.toString(), note },
+    });
+    return this.prisma.reversement.findUniqueOrThrow({ where: { id } });
+  }
+
+  private async demandeEnAttente(id: number) {
+    const demande = await this.prisma.demandeReversement.findUnique({ where: { id } });
+    if (!demande) throw new NotFoundException(`Demande de reversement ${id} introuvable`);
+    if (demande.statut !== 'en_attente') {
+      throw new ConflictException(`Demande déjà traitée (${demande.statut})`);
+    }
+    return demande;
+  }
+
+  private async notifierGestionnaires(compagnieId: number, notif: Notif) {
+    const gestionnaires = await this.prisma.utilisateur.findMany({
+      where: { role: UserRole.COMPANY_ADMIN, compagnieId, actif: true },
+      select: { id: true },
+    });
+    for (const g of gestionnaires) await this.notifications.notifier(g.id, notif);
   }
 
   // Issue du transfert (webhook Jèko ou réconciliation). Idempotent.
@@ -252,6 +566,14 @@ export class ReversementsService {
         entite: 'reversement',
         entiteId: id,
         metadata: { compagnieId: rev.compagnieId, montantNet: rev.montantNet.toString() },
+      });
+      // Fonds arrivés sur le numéro de Yègo : la compagnie sait que la remise
+      // en main propre va suivre.
+      await this.notifierGestionnaires(rev.compagnieId, {
+        type: 'reversement.pret',
+        titre: 'Reversement prêt',
+        corps: `Votre reversement de ${rev.montantNet} FCFA est prêt : Yègo va vous le remettre.`,
+        donnees: { compagnieId: rev.compagnieId, reversementId: id },
       });
       return;
     }
@@ -306,7 +628,7 @@ export class ReversementsService {
         await this.notifications.notifier(a.id, {
           type: 'reversement.coordonnees_modifiees',
           titre: 'Compte de reversement modifié',
-          corps: `${avant.nom} a changé son compte de reversement (${dto.moyen} ${dto.telephone}). Reversements bloqués 24 h : vérifiez auprès de la compagnie.`,
+          corps: `${avant.nom} a changé son numéro Mobile Money (${dto.moyen} ${dto.telephone}).`,
           donnees: { compagnieId },
         });
       }
@@ -328,9 +650,17 @@ export class ReversementsService {
 
   findAll(
     user: AuthenticatedUser,
-    filtres: { compagnieId?: number; statut?: string; skip?: number; take?: number },
+    filtres: {
+      compagnieId?: number;
+      statut?: string;
+      aRemettre?: string;
+      skip?: number;
+      take?: number;
+    },
   ) {
     const where: Prisma.ReversementWhereInput = {};
+    if (filtres.aRemettre === 'true') Object.assign(where, { statut: 'effectue', remisLe: null });
+    if (filtres.aRemettre === 'false') where.remisLe = { not: null };
     if (user.role === UserRole.ADMIN) {
       if (filtres.compagnieId) where.compagnieId = filtres.compagnieId;
     } else {
@@ -385,10 +715,7 @@ export class ReversementsService {
   // ---------------------------------------------------------------------------
 
   private async calculerLot(compagnieId: number): Promise<Lot> {
-    const aujourdHui = new Date();
-    const debutDuJour = new Date(
-      Date.UTC(aujourdHui.getUTCFullYear(), aujourdHui.getUTCMonth(), aujourdHui.getUTCDate()),
-    );
+    const debutDuJour = this.debutDuJour();
     const paiements = await this.prisma.paiement.findMany({
       where: {
         reversementId: null,
@@ -430,11 +757,7 @@ export class ReversementsService {
       montantBrut = montantBrut.plus(part);
     }
 
-    // Commission arrondie au franc inférieur (pas de centimes en XOF).
-    const commission = montantBrut
-      .times(this.commissionPourcent())
-      .dividedBy(100)
-      .floor();
+    const commission = this.commissionSur(montantBrut);
     return {
       paiementIds,
       montantBrut,
@@ -446,8 +769,10 @@ export class ReversementsService {
 
   // Échec : le reversement est clos en 'echoue' et ses paiements redeviennent
   // éligibles pour un prochain reversement.
+  // La demande de la compagnie qui l'avait déclenché repasse en attente :
+  // l'admin pourra la réapprouver une fois le problème réglé.
   private async echouer(id: number, motif: string) {
-    await this.prisma.$transaction([
+    const [rev, , demandes] = await this.prisma.$transaction([
       this.prisma.reversement.update({
         where: { id },
         data: { statut: 'echoue', motifEchec: motif.slice(0, 500) },
@@ -456,6 +781,10 @@ export class ReversementsService {
         where: { reversementId: id },
         data: { reversementId: null },
       }),
+      this.prisma.demandeReversement.updateMany({
+        where: { reversementId: id },
+        data: { statut: 'en_attente', reversementId: null, traiteParId: null, dateTraitement: null },
+      }),
     ]);
     await this.audit.record({
       action: 'reversement.echoue',
@@ -463,22 +792,14 @@ export class ReversementsService {
       entiteId: id,
       metadata: { motif },
     });
-  }
-
-  private async contactJeko(
-    compagnieId: number,
-    nom: string,
-    moyen: NonNullable<ReturnType<typeof versMoyenJeko>>,
-    telephone: string,
-    existant: string | null,
-  ): Promise<string> {
-    if (existant) return existant;
-    const contactId = await this.jeko.creerContact({ nom, moyen, telephone });
-    await this.prisma.compagnie.update({
-      where: { id: compagnieId },
-      data: { jekoContactId: contactId },
-    });
-    return contactId;
+    if (demandes.count > 0) {
+      await this.notifierGestionnaires(rev.compagnieId, {
+        type: 'reversement.echoue',
+        titre: 'Reversement non abouti',
+        corps: 'Le reversement n’a pas pu être traité. Votre demande reste en attente, Yègo la relancera.',
+        donnees: { compagnieId: rev.compagnieId, reversementId: id },
+      });
+    }
   }
 
   private async lireSoldeOuNull(): Promise<number | null> {
@@ -491,6 +812,16 @@ export class ReversementsService {
     }
   }
 
+  private debutDuJour(): Date {
+    const n = new Date();
+    return new Date(Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate()));
+  }
+
+  // Commission arrondie au franc inférieur (pas de centimes en XOF).
+  private commissionSur(montantBrut: Prisma.Decimal): Prisma.Decimal {
+    return montantBrut.times(this.commissionPourcent()).dividedBy(100).floor();
+  }
+
   private commissionPourcent(): number {
     return Number(this.config.get('REVERSEMENT_COMMISSION_POURCENT') ?? 0);
   }
@@ -499,12 +830,6 @@ export class ReversementsService {
     const compagnie = await this.prisma.compagnie.findUnique({ where: { id } });
     if (!compagnie) throw new NotFoundException(`Compagnie ${id} introuvable`);
     return compagnie;
-  }
-
-  private finDelaiSecurite(modifieesLe: Date | null): Date | null {
-    if (!modifieesLe) return null;
-    const fin = new Date(modifieesLe.getTime() + DELAI_SECURITE_COORDONNEES_MS);
-    return fin.getTime() > Date.now() ? fin : null;
   }
 
   private coordonneesDe(c: { reversementMoyen: string | null; reversementTelephone: string | null }) {

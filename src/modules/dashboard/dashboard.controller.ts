@@ -9,13 +9,19 @@ import { DashboardService } from './dashboard.service';
 import { DashboardPeriodeDto } from './dto/dashboard-periode.dto';
 import { DashboardClassementDto } from './dto/dashboard-classement.dto';
 import { DashboardSerieDto } from './dto/dashboard-serie.dto';
+import { resoudreCompagnieCible } from '../../common/scope';
+import { ReversementsService } from '../reversements/reversements.service';
+import { ApercuReversementQuery } from '../reversements/dto/reversement.dto';
 
 // Admin plateforme (toutes compagnies, filtrables) ou company_admin (la sienne).
 @Controller('dashboard')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @RequirePermissions(PERMISSIONS.DASHBOARD_READ)
 export class DashboardController {
-  constructor(private dashboardService: DashboardService) {}
+  constructor(
+    private dashboardService: DashboardService,
+    private reversements: ReversementsService,
+  ) {}
 
   // Vue d'ensemble : réservations, canal, chiffre d'affaires, remplissage.
   @Get('resume')
@@ -33,6 +39,20 @@ export class DashboardController {
     @Query() dto: DashboardSerieDto,
   ) {
     return this.dashboardService.serie(user, dto);
+  }
+
+  // Solde de la compagnie : ventes en ligne à lui reverser (disponible, en
+  // attente, en cours) et cumul déjà reversé. company_admin : la sienne ;
+  // admin : ?compagnieId requis.
+  @Get('solde')
+  solde(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() q: ApercuReversementQuery,
+  ) {
+    return this.reversements.soldeCompagnie(
+      resoudreCompagnieCible(user, q.compagnieId),
+      user,
+    );
   }
 
   // Trajets les plus vendus (revenu encaissé).

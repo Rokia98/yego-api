@@ -44,6 +44,7 @@ model Compagnie {
 
   abonnements   Abonnement[]
   reversements  Reversement[]
+  demandesReversement DemandeReversement[]
   vehicules     Vehicule[]
   chauffeurs    Chauffeur[]
   trajets       Trajet[]
@@ -394,9 +395,15 @@ model Reversement {
   creeParId       Int?       @map("cree_par_id")
   dateCreation    DateTime   @default(now()) @map("date_creation")
   dateEffectue    DateTime?  @map("date_effectue")
+  // Remise en main propre à la compagnie par l'admin (hors système), une fois
+  // les fonds arrivés sur le numéro de Yègo (beneficiaire).
+  remisLe         DateTime?  @map("remis_le")
+  remisParId      Int?       @map("remis_par_id")
+  remiseNote      String?    @map("remise_note")
 
   compagnie       Compagnie  @relation(fields: [compagnieId], references: [id], onDelete: Restrict)
   paiements       Paiement[]
+  demande         DemandeReversement?
 
   @@index([compagnieId])
   @@map("reversements")
@@ -475,4 +482,50 @@ model CompagnieDocument {
 
   @@index([compagnieId])
   @@map("compagnie_documents")
+}
+
+// Demande de reversement faite par une compagnie (gestionnaire) : l'admin
+// plateforme l'approuve (ce qui lance le transfert Jèko, cf. Reversement) ou
+// la rejette. Une seule demande en_attente par compagnie.
+// Statuts : en_attente → approuvee | rejetee | annulee (par la compagnie).
+model DemandeReversement {
+  id               Int          @id @default(autoincrement())
+  compagnieId      Int          @map("compagnie_id")
+  statut           String       @default("en_attente")
+  // Net reversable au moment de la demande (indicatif : le montant réel est
+  // recalculé à l'approbation).
+  montantNetEstime Decimal      @map("montant_net_estime") @db.Decimal(12, 2)
+  commentaire      String?
+  motifRejet       String?      @map("motif_rejet")
+  demandeParId     Int?         @map("demande_par_id")
+  traiteParId      Int?         @map("traite_par_id")
+  reversementId    Int?         @unique @map("reversement_id")
+  dateDemande      DateTime     @default(now()) @map("date_demande")
+  dateTraitement   DateTime?    @map("date_traitement")
+
+  compagnie        Compagnie    @relation(fields: [compagnieId], references: [id], onDelete: Cascade)
+  reversement      Reversement? @relation(fields: [reversementId], references: [id], onDelete: SetNull)
+
+  @@index([compagnieId, statut])
+  @@map("demandes_reversement")
+}
+
+// Retrait de la part Yègo (frais de service, commissions) du magasin Jèko vers
+// le numéro Mobile Money de Yègo (RETRAIT_YEGO_TELEPHONE). Référence Jèko
+// YEGO-RT<id>. Statuts : en_cours → effectue | echoue.
+model RetraitPlateforme {
+  id              Int       @id @default(autoincrement())
+  montant         Decimal   @db.Decimal(12, 2)
+  moyen           String
+  beneficiaire    String
+  statut          String    @default("en_cours")
+  jekoTransferId  String?   @unique @map("jeko_transfer_id")
+  jekoReference   String?   @unique @map("jeko_reference")
+  fraisJeko       Decimal?  @map("frais_jeko") @db.Decimal(12, 2)
+  motifEchec      String?   @map("motif_echec")
+  creeParId       Int?      @map("cree_par_id")
+  dateCreation    DateTime  @default(now()) @map("date_creation")
+  dateEffectue    DateTime? @map("date_effectue")
+
+  @@map("retraits_plateforme")
 }

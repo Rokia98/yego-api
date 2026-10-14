@@ -73,7 +73,7 @@ export class PaiementsService {
 
   // Frais de service appliqués aux achats en ligne (FRAIS_SERVICE_POURCENT).
   fraisServicePourcent(): number {
-    return Number(this.config.get('FRAIS_SERVICE_POURCENT') ?? 5);
+    return Number(this.config.get('FRAIS_SERVICE_POURCENT') ?? 3.5);
   }
 
   // Si Jèko est configuré (JEKO_API_KEY), un paiement mobile money ouvre une

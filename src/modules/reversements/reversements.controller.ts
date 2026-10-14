@@ -20,9 +20,14 @@ import { AuthenticatedUser } from '../auth/strategies/jwt.strategy';
 import { ReversementsService } from './reversements.service';
 import {
   ApercuReversementQuery,
+  ApprouverDemandeReversementDto,
   CoordonneesReversementDto,
+  RemiseReversementDto,
   CreerReversementDto,
+  DemanderReversementDto,
+  ListeDemandesReversementQuery,
   ListeReversementsQuery,
+  RejeterDemandeReversementDto,
 } from './dto/reversement.dto';
 
 @Controller('reversements')
@@ -73,17 +78,97 @@ export class ReversementsController {
     @Body() dto: CreerReversementDto,
     @Ip() ip: string,
   ) {
-    return this.reversements.creer(dto.compagnieId, {
+    return this.reversements.creer(dto.compagnieId, dto.moyen, {
       userId: user.userId,
       role: user.role,
       ip,
     });
   }
 
+  // --- Demandes de reversement (compagnie → admin) -------------------------
+
+  @RequirePermissions(PERMISSIONS.REVERSEMENT_DEMANDER)
+  @Post('demandes')
+  demander(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: DemanderReversementDto,
+    @Ip() ip: string,
+  ) {
+    return this.reversements.demander(user, dto.commentaire, ip);
+  }
+
+  // Admin : toutes (filtre ?compagnieId) ; gestionnaire : celles de sa compagnie.
+  @RequirePermissions(PERMISSIONS.REVERSEMENT_READ)
+  @Get('demandes')
+  listerDemandes(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() q: ListeDemandesReversementQuery,
+  ) {
+    return this.reversements.listerDemandes(user, q);
+  }
+
+  // Lance le transfert Jèko vers le numéro Wave / Orange Money de Yègo.
+  @RequirePermissions(PERMISSIONS.REVERSEMENT_MANAGE)
+  @Post('demandes/:id/approuver')
+  approuverDemande(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ApprouverDemandeReversementDto,
+    @Ip() ip: string,
+  ) {
+    return this.reversements.approuverDemande(id, dto.moyen, {
+      userId: user.userId,
+      role: user.role,
+      ip,
+    });
+  }
+
+  @RequirePermissions(PERMISSIONS.REVERSEMENT_MANAGE)
+  @Post('demandes/:id/rejeter')
+  rejeterDemande(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: RejeterDemandeReversementDto,
+    @Ip() ip: string,
+  ) {
+    return this.reversements.rejeterDemande(id, dto.motif, {
+      userId: user.userId,
+      role: user.role,
+      ip,
+    });
+  }
+
+  @RequirePermissions(PERMISSIONS.REVERSEMENT_DEMANDER)
+  @Post('demandes/:id/annuler')
+  annulerDemande(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.reversements.annulerDemande(id, user);
+  }
+
+  // -------------------------------------------------------------------------
+
   @RequirePermissions(PERMISSIONS.REVERSEMENT_READ)
   @Get()
   findAll(@CurrentUser() user: AuthenticatedUser, @Query() q: ListeReversementsQuery) {
     return this.reversements.findAll(user, q);
+  }
+
+  // L'admin déclare avoir remis l'argent à la compagnie (hors système).
+  @RequirePermissions(PERMISSIONS.REVERSEMENT_MANAGE)
+  @Post(':id/remise')
+  marquerRemis(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: RemiseReversementDto,
+    @Ip() ip: string,
+  ) {
+    return this.reversements.marquerRemis(id, dto.note, {
+      userId: user.userId,
+      role: user.role,
+      ip,
+    });
   }
 
   @RequirePermissions(PERMISSIONS.REVERSEMENT_READ)

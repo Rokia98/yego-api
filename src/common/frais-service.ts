@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client';
 
 // Frais de service Yègo sur un achat en ligne, arrondis au franc (pas de
-// centimes en XOF) : 5 % de 15 000 F = 750 F.
+// centimes en XOF) : 3,5 % de 15 000 F = 525 F.
 export function calculerFraisService(
   montant: Prisma.Decimal,
   pourcent: number,

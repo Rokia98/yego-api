@@ -11,3 +11,4 @@ process.env.JEKO_SUCCESS_URL = 'https://yego.test/paiement/succes';
 process.env.JEKO_ERROR_URL = 'https://yego.test/paiement/echec';
 process.env.JEKO_API_URL = `http://127.0.0.1:${JEKO_PORT_STUB}`;
 process.env.REVERSEMENT_COMMISSION_POURCENT = '10';
+process.env.RETRAIT_YEGO_TELEPHONE = '0798496595';

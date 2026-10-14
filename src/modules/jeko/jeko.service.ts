@@ -6,6 +6,7 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Prisma } from '@prisma/client';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { MoyenJeko } from '../../common/moyens-paiement';
 
@@ -58,6 +59,35 @@ export class JekoService {
 
   estConfigure(): boolean {
     return !!this.config.get<string>('JEKO_API_KEY');
+  }
+
+  // Frais Jèko d'un transfert sortant, débités du magasin EN PLUS du montant
+  // envoyé (constaté : 200 F envoyés → 203 F débités). Arrondi au franc
+  // supérieur pour ne jamais sous-estimer.
+  fraisTransfertFcfa(montant: Prisma.Decimal.Value): Prisma.Decimal {
+    return new Prisma.Decimal(montant)
+      .times(this.fraisTransfertPourcent())
+      .dividedBy(100)
+      .ceil();
+  }
+
+  // Variable vide (docker-compose `${VAR:-}`) = valeur par défaut, pas 0.
+  fraisTransfertPourcent(): number {
+    const brut = this.config.get('JEKO_FRAIS_TRANSFERT_POURCENT');
+    return brut === undefined || brut === '' ? 1.5 : Number(brut);
+  }
+
+  // Plus gros montant envoyable quand `disponible` doit couvrir montant + frais.
+  maxTransferableFcfa(disponible: Prisma.Decimal): Prisma.Decimal {
+    if (disponible.lessThanOrEqualTo(0)) return new Prisma.Decimal(0);
+    let m = disponible
+      .times(100)
+      .dividedBy(100 + this.fraisTransfertPourcent())
+      .floor();
+    while (m.greaterThan(0) && m.plus(this.fraisTransfertFcfa(m)).greaterThan(disponible)) {
+      m = m.minus(1);
+    }
+    return m;
   }
 
   // Encaissement direct opérateur (forceProviderDirect) : Orange / Wave / Djamo

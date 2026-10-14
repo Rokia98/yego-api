@@ -5,12 +5,15 @@ import {
   IsInt,
   IsOptional,
   IsUrl,
+  Matches,
   Max,
   Min,
   IsString,
   MinLength,
   validateSync,
 } from 'class-validator';
+import { TELEPHONE_MOBILE_MONEY_CI } from '../common/moyens-paiement';
+import { normaliserTelephone } from '../common/telephone';
 
 // docker-compose transmet `VAR: ${VAR:-}` comme chaîne vide : on la traite
 // comme absente, sinon @IsUrl / @MinLength la rejetteraient.
@@ -135,7 +138,9 @@ export class EnvironmentVariables {
   @IsString()
   APP_DEEP_LINK_PAIEMENT?: string;
 
-  // Frais de service Yègo ajoutés au prix des billets achetés en ligne (en %).
+  // Frais de service ajoutés au prix des billets achetés en ligne (en %) :
+  // 3,5 % = 1,5 % de frais Jèko à l'encaissement + 1,5 % de frais Jèko sur le
+  // transfert du reversement + 0,5 % pour Yègo. La compagnie reçoit 100 %.
   // Payés par le voyageur, ni remboursés ni reversés à la compagnie.
   @IsOptional()
   @Transform(({ value }) =>
@@ -143,7 +148,7 @@ export class EnvironmentVariables {
   )
   @Min(0)
   @Max(20)
-  FRAIS_SERVICE_POURCENT = 5;
+  FRAIS_SERVICE_POURCENT = 3.5;
 
   // Commission Yègo retenue sur chaque reversement aux compagnies (en %).
   @IsOptional()
@@ -153,6 +158,27 @@ export class EnvironmentVariables {
   @Min(0)
   @Max(50)
   REVERSEMENT_COMMISSION_POURCENT = 0;
+
+  // Frais Jèko sur un transfert sortant (en %), débités du magasin en plus
+  // du montant envoyé (200 F envoyés → 203 F débités).
+  @IsOptional()
+  @Transform(({ value }) =>
+    value === undefined || value === '' ? undefined : Number(value),
+  )
+  @Min(0)
+  @Max(10)
+  JEKO_FRAIS_TRANSFERT_POURCENT = 1.5;
+
+  // Numéro Mobile Money (Wave / Orange Money) de Yègo : seule destination
+  // possible des retraits de la part Yègo depuis le magasin Jèko (POST
+  // /retraits). Fixé ici et non dans la requête : un compte admin compromis
+  // ne peut pas détourner les fonds vers un autre numéro.
+  @IsOptional()
+  @Transform(({ value }) =>
+    value === undefined || value === '' ? undefined : normaliserTelephone(String(value)),
+  )
+  @Matches(TELEPHONE_MOBILE_MONEY_CI)
+  RETRAIT_YEGO_TELEPHONE?: string;
 
   // Seed au démarrage du conteneur (comptes de démo aux mots de passe publics,
   // cf. README). Interdit en production — voir validate().

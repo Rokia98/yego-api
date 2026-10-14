@@ -111,8 +111,8 @@ describe('validate (env)', () => {
       ).toThrow(/JEKO_WEBHOOK_SECRET/);
     });
 
-    it('frais de service : 5 % par défaut, bornés à 20 %', () => {
-      expect(validate({ ...base }).FRAIS_SERVICE_POURCENT).toBe(5);
+    it('frais de service : 3,5 % par défaut, bornés à 20 %', () => {
+      expect(validate({ ...base }).FRAIS_SERVICE_POURCENT).toBe(3.5);
       expect(validate({ ...base, FRAIS_SERVICE_POURCENT: '0' }).FRAIS_SERVICE_POURCENT).toBe(0);
       expect(() => validate({ ...base, FRAIS_SERVICE_POURCENT: '25' })).toThrow();
     });

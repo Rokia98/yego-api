@@ -43,9 +43,12 @@ services:
       - key: RESERVATION_PAIEMENT_TTL_MINUTES
         value: "30"
       - key: FRAIS_SERVICE_POURCENT
-        value: "5"
+        value: "3.5"
       - key: REVERSEMENT_COMMISSION_POURCENT
         value: "0"
+      # Seule destination des retraits de la part Yègo (Wave / Orange Money).
+      - key: RETRAIT_YEGO_TELEPHONE
+        value: "+2250798496595"
       - key: APP_DEEP_LINK_PAIEMENT
         value: yego://paiement
       # ── Secrets (saisis dans le tableau de bord Render) ──────────────────

@@ -234,6 +234,58 @@ describe('Yègo API (e2e)', () => {
   });
 
   // ---------------------------------------------------------------------------
+  describe('Liste des utilisateurs (admin)', () => {
+    it('réservée à l’admin plateforme', async () => {
+      await http().get('/api/v1/utilisateurs').set(auth('gestionnaire')).expect(403);
+      await http().get('/api/v1/utilisateurs').set(auth('voyageur')).expect(403);
+    });
+
+    it('tableau paginé + total dans X-Total-Count, sans hash de mot de passe', async () => {
+      const total = await prisma.utilisateur.count();
+      const r = await http().get('/api/v1/utilisateurs?take=2').set(auth('admin')).expect(200);
+      expect(r.body).toHaveLength(2);
+      expect(r.headers['x-total-count']).toBe(String(total));
+      expect(r.body[0]).toEqual(
+        expect.objectContaining({ id: expect.any(Number), role: expect.any(String), actif: true }),
+      );
+      expect(r.body[0]).not.toHaveProperty('motDePasseHash');
+    });
+
+    it('filtres role, compagnieId, actif et q', async () => {
+      const agents = await http()
+        .get(`/api/v1/utilisateurs?role=agent&compagnieId=${fx.compagnieId}`)
+        .set(auth('admin'))
+        .expect(200);
+      expect(agents.body.length).toBeGreaterThan(0);
+      for (const u of agents.body) {
+        expect(u).toMatchObject({
+          role: 'agent',
+          compagnieId: fx.compagnieId,
+          compagnie: { id: fx.compagnieId },
+        });
+      }
+
+      const parTel = await http()
+        .get(`/api/v1/utilisateurs?q=${encodeURIComponent(fx.comptes.voyageur.telephone)}`)
+        .set(auth('admin'))
+        .expect(200);
+      expect(parTel.body).toHaveLength(1);
+      expect(parTel.body[0].role).toBe('user');
+
+      const inactifs = await http()
+        .get('/api/v1/utilisateurs?actif=false')
+        .set(auth('admin'))
+        .expect(200);
+      expect(inactifs.headers['x-total-count']).toBe(
+        String(await prisma.utilisateur.count({ where: { actif: false } })),
+      );
+      for (const u of inactifs.body) expect(u.actif).toBe(false);
+
+      await http().get('/api/v1/utilisateurs?role=patron').set(auth('admin')).expect(400);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   describe('Compagnie : logo + compte gestionnaire', () => {
     const logoData =
       'data:image/png;base64,' + 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB'.repeat(4);
@@ -1115,7 +1167,7 @@ describe('Yègo API (e2e)', () => {
       expect(r.body.auteurRole).toBe('agent');
     });
 
-    it("portée : chacun ses demandes ; seul l'admin voit tout (pas le gestionnaire)", async () => {
+    it("portée : chacun ses demandes ; l'admin voit tout ; le gestionnaire voit les demandes voyageurs de sa compagnie", async () => {
       const ids = async (role: string, qs = '') =>
         (
           await http()
@@ -1126,9 +1178,14 @@ describe('Yègo API (e2e)', () => {
 
       expect(await ids('voyageur')).toEqual([demandeVoyageur]);
       expect(await ids('agent')).toEqual([demandeAgent]);
-      // le gestionnaire de la compagnie ne voit NI la demande du voyageur
-      // rattachée à sa compagnie, NI celle de son agent
-      expect(await ids('gestionnaire')).toEqual([]);
+      // le gestionnaire voit la demande du voyageur rattachée à sa compagnie,
+      // PAS celle de son agent (adressée à l'équipe Yègo)
+      expect(await ids('gestionnaire')).toEqual([demandeVoyageur]);
+      expect(
+        await prisma.notification.findFirst({
+          where: { utilisateurId: uid.gestionnaire, type: 'support.nouvelle' },
+        }),
+      ).toBeTruthy();
       expect(await ids('autreAgent')).toEqual([]);
       expect(await ids('admin')).toEqual(
         expect.arrayContaining([demandeVoyageur, demandeAgent]),
@@ -1139,12 +1196,14 @@ describe('Yègo API (e2e)', () => {
         .get('/api/v1/support/demandes?statut=nimporte')
         .set(auth('admin'))
         .expect(400);
-      for (const role of ['autreAgent', 'gestionnaire']) {
-        await http()
-          .get(`/api/v1/support/demandes/${demandeVoyageur}`)
-          .set(auth(role))
-          .expect(404);
-      }
+      await http()
+        .get(`/api/v1/support/demandes/${demandeVoyageur}`)
+        .set(auth('autreAgent'))
+        .expect(404);
+      await http()
+        .get(`/api/v1/support/demandes/${demandeAgent}`)
+        .set(auth('gestionnaire'))
+        .expect(404);
     });
 
     it("l'admin répond à la demande voyageur → en_cours + notification", async () => {
@@ -1164,19 +1223,40 @@ describe('Yègo API (e2e)', () => {
       expect(notif).toBeTruthy();
     });
 
-    it('le gestionnaire ne peut ni répondre ni modifier une demande de sa compagnie → 404', async () => {
-      for (const id of [demandeVoyageur, demandeAgent]) {
-        await http()
-          .post(`/api/v1/support/demandes/${id}/messages`)
-          .set(auth('gestionnaire'))
-          .send({ contenu: 'Je réponds ?' })
-          .expect(404);
-        await http()
-          .patch(`/api/v1/support/demandes/${id}`)
-          .set(auth('gestionnaire'))
-          .send({ statut: 'resolue' })
-          .expect(404);
-      }
+    it('le gestionnaire répond à la demande voyageur de sa compagnie, pas à celle de son agent', async () => {
+      const rep = await http()
+        .post(`/api/v1/support/demandes/${demandeVoyageur}/messages`)
+        .set(auth('gestionnaire'))
+        .send({ contenu: 'Nous vérifions votre trajet de notre côté.' })
+        .expect(201);
+      expect(rep.body.auteur.role).toBe('company_admin');
+      await http()
+        .post(`/api/v1/support/demandes/${demandeVoyageur}/messages`)
+        .set(auth('gestionnaire'))
+        .send({ contenu: 'note', interne: true })
+        .expect(403);
+      const notif = await prisma.notification.findFirst({
+        where: { utilisateurId: uid.voyageur, type: 'support.reponse' },
+        orderBy: { id: 'desc' },
+      });
+      expect(notif?.titre).toMatch(/^Réponse de /);
+
+      await http()
+        .post(`/api/v1/support/demandes/${demandeAgent}/messages`)
+        .set(auth('gestionnaire'))
+        .send({ contenu: 'Je réponds ?' })
+        .expect(404);
+      await http()
+        .patch(`/api/v1/support/demandes/${demandeAgent}`)
+        .set(auth('gestionnaire'))
+        .send({ statut: 'resolue' })
+        .expect(404);
+      // Un autre gestionnaire / agent d'une autre compagnie : rien.
+      await http()
+        .post(`/api/v1/support/demandes/${demandeVoyageur}/messages`)
+        .set(auth('autreAgent'))
+        .send({ contenu: 'x' })
+        .expect(404);
     });
 
     it("notes internes : admin seulement, invisibles pour l'auteur", async () => {
@@ -1200,7 +1280,8 @@ describe('Yègo API (e2e)', () => {
         ).body;
       const pourAuteur = await vu('voyageur');
       expect(pourAuteur.messages.some((m: any) => m.interne)).toBe(false);
-      expect(pourAuteur.nbMessages).toBe(2); // la note ne compte pas
+      // 1er message + réponse admin + réponse gestionnaire ; la note ne compte pas
+      expect(pourAuteur.nbMessages).toBe(3);
       const pourAdmin = await vu('admin');
       expect(pourAdmin.messages.some((m: any) => m.interne)).toBe(true);
     });
@@ -1239,7 +1320,8 @@ describe('Yègo API (e2e)', () => {
           .body;
       // admin : demande voyageur ré-ouverte + demande de l'agent (ouverte)
       expect(await compteurs('admin')).toEqual({ ouverte: 2, en_cours: 0 });
-      expect(await compteurs('gestionnaire')).toEqual({ ouverte: 0, en_cours: 0 });
+      // gestionnaire : la demande voyageur de sa compagnie (ré-ouverte)
+      expect(await compteurs('gestionnaire')).toEqual({ ouverte: 1, en_cours: 0 });
       expect(await compteurs('agent')).toEqual({ ouverte: 1, en_cours: 0 });
     });
 
@@ -1340,7 +1422,9 @@ describe('Yègo API (e2e)', () => {
         .set(auth('gestionnaire'))
         .expect(200);
       expect(Array.isArray(r.body)).toBe(true);
-      expect(r.body.length).toBe(0);
+      // Seules les siennes (ex. support.nouvelle), aucune du voyageur.
+      expect(r.body.every((n: any) => n.utilisateurId === uid.gestionnaire)).toBe(true);
+      expect(r.body.some((n: any) => n.type.startsWith('reservation.'))).toBe(false);
     });
   });
 

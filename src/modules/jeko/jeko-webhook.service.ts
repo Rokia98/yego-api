@@ -4,6 +4,7 @@ import { PrismaService } from '../../prisma.service';
 import { PaiementsService } from '../paiements/paiements.service';
 import { RemboursementsService } from '../remboursements/remboursements.service';
 import { ReversementsService } from '../reversements/reversements.service';
+import { RetraitsService } from '../reversements/retraits.service';
 import { JekoService, StatutJeko } from './jeko.service';
 
 // Corps de TRANSACTION_COMPLETED (plat, sans champ `event`).
@@ -20,6 +21,7 @@ export interface TransactionJeko {
 
 const REFERENCE_REMBOURSEMENT = /^YEGO-RB(\d+)-T\d+$/;
 const REFERENCE_REVERSEMENT = /^YEGO-RV(\d+)$/;
+const REFERENCE_RETRAIT = /^YEGO-RT(\d+)$/;
 
 // Au-delà, une demande de paiement n'est plus payable : inutile de la sonder.
 const FENETRE_RECONCILIATION_PAIEMENT_MS = 2 * 60 * 60 * 1000;
@@ -41,6 +43,7 @@ export class JekoWebhookService {
     private paiements: PaiementsService,
     private remboursements: RemboursementsService,
     private reversements: ReversementsService,
+    private retraits: RetraitsService,
   ) {}
 
   async traiter(evenement: string | undefined, corps: TransactionJeko): Promise<void> {
@@ -78,6 +81,13 @@ export class JekoWebhookService {
         });
         return;
       }
+      const rt = REFERENCE_RETRAIT.exec(reference);
+      if (rt) {
+        await this.retraits.appliquerResultatTransfert(Number(rt[1]), statut, {
+          fraisCentimes: corps.fees?.amount,
+        });
+        return;
+      }
     }
     this.logger.warn(
       `Transaction Jèko non rattachée : ${corps.transactionType ?? '?'} ${reference ?? '(sans référence)'}`,
@@ -85,8 +95,13 @@ export class JekoWebhookService {
   }
 
   @Cron(CronExpression.EVERY_5_MINUTES)
-  async reconcilier(): Promise<{ paiements: number; remboursements: number; reversements: number }> {
-    const bilan = { paiements: 0, remboursements: 0, reversements: 0 };
+  async reconcilier(): Promise<{
+    paiements: number;
+    remboursements: number;
+    reversements: number;
+    retraits: number;
+  }> {
+    const bilan = { paiements: 0, remboursements: 0, reversements: 0, retraits: 0 };
     if (!this.jeko.estConfigure()) return bilan;
 
     const depuis = new Date(Date.now() - FENETRE_RECONCILIATION_PAIEMENT_MS);
@@ -126,6 +141,18 @@ export class JekoWebhookService {
       await this.sansPlanter(`reversement ${r.id}`, async () => {
         await this.reversements.synchroniserTransfert(r);
         bilan.reversements++;
+      });
+    }
+
+    const retraits = await this.prisma.retraitPlateforme.findMany({
+      where: { statut: 'en_cours', jekoTransferId: { not: null } },
+      select: { id: true, jekoTransferId: true },
+      take: LOT_RECONCILIATION,
+    });
+    for (const r of retraits) {
+      await this.sansPlanter(`retrait ${r.id}`, async () => {
+        await this.retraits.synchroniserTransfert(r);
+        bilan.retraits++;
       });
     }
     return bilan;

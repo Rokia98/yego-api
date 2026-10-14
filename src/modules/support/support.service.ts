@@ -41,10 +41,12 @@ type Demande = {
 /**
  * Support : demandes d'assistance.
  *
- * Seule l'équipe Yègo (admin plateforme, perm support:manage) voit et traite
- * les demandes. Tout autre rôle — voyageur, agent, company_admin — ne voit
- * que les demandes qu'il a lui-même ouvertes. compagnieId reste renseigné
- * (tri / filtre côté admin) mais ne donne aucun accès.
+ * - Équipe Yègo (admin plateforme, perm support:manage) : voit et traite tout.
+ * - Gestionnaire de compagnie (perm support:compagnie) : voit et traite aussi
+ *   les demandes des VOYAGEURS rattachées à sa compagnie (le voyageur a joint
+ *   une réservation de cette compagnie). Pas celles de ses agents, ni les
+ *   notes internes de Yègo.
+ * - Tout autre cas : uniquement les demandes qu'on a soi-même ouvertes.
  */
 @Injectable()
 export class SupportService {
@@ -87,7 +89,7 @@ export class SupportService {
     }
 
     const maintenant = new Date();
-    return this.prisma.demandeSupport.create({
+    const demande = await this.prisma.demandeSupport.create({
       data: {
         auteurId: user.userId,
         auteurRole: user.role,
@@ -111,6 +113,24 @@ export class SupportService {
         messages: { include: MESSAGE_AUTEUR, orderBy: { dateCreation: 'asc' } },
       },
     });
+
+    // Demande d'un voyageur sur un trajet de la compagnie : ses gestionnaires
+    // sont prévenus (ils peuvent la traiter).
+    if (user.role === UserRole.USER && compagnieId != null) {
+      const gestionnaires = await this.prisma.utilisateur.findMany({
+        where: { role: UserRole.COMPANY_ADMIN, compagnieId, actif: true },
+        select: { id: true },
+      });
+      for (const g of gestionnaires) {
+        await this.notifications.notifier(g.id, {
+          type: 'support.nouvelle',
+          titre: 'Nouvelle demande voyageur',
+          corps: `« ${dto.sujet} »`,
+          donnees: { demandeId: demande.id },
+        });
+      }
+    }
+    return demande;
   }
 
   lister(user: AuthenticatedUser, f: ListeDemandesDto = {}) {
@@ -187,7 +207,10 @@ export class SupportService {
     if (!interne && traitant && !auteur) {
       await this.notifications.notifier(demande.auteurId, {
         type: 'support.reponse',
-        titre: 'Réponse du support',
+        titre:
+          user.role === UserRole.COMPANY_ADMIN
+            ? `Réponse de ${demande.compagnie?.nom ?? 'la compagnie'}`
+            : 'Réponse du support',
         corps: `Nouvelle réponse à votre demande « ${demande.sujet} ».`,
         donnees: { demandeId: id },
       });
@@ -265,16 +288,29 @@ export class SupportService {
     return demande;
   }
 
-  // Traitant = équipe Yègo. L'auteur d'une demande n'en est jamais le traitant.
+  // Traitant = équipe Yègo, ou gestionnaire pour une demande voyageur de sa
+  // compagnie. L'auteur d'une demande n'en est jamais le traitant.
   private estTraitant(user: AuthenticatedUser, demande: Demande): boolean {
+    if (demande.auteurId === user.userId) return false;
+    if (aLaPermission(user.role, PERMISSIONS.SUPPORT_MANAGE)) return true;
     return (
-      aLaPermission(user.role, PERMISSIONS.SUPPORT_MANAGE) &&
-      demande.auteurId !== user.userId
+      aLaPermission(user.role, PERMISSIONS.SUPPORT_COMPAGNIE) &&
+      user.compagnieId != null &&
+      demande.auteurRole === UserRole.USER &&
+      demande.compagnieId === user.compagnieId
     );
   }
 
   private portee(user: AuthenticatedUser): Prisma.DemandeSupportWhereInput {
     if (aLaPermission(user.role, PERMISSIONS.SUPPORT_MANAGE)) return {};
+    if (aLaPermission(user.role, PERMISSIONS.SUPPORT_COMPAGNIE) && user.compagnieId != null) {
+      return {
+        OR: [
+          { auteurId: user.userId },
+          { auteurRole: UserRole.USER, compagnieId: user.compagnieId },
+        ],
+      };
+    }
     return { auteurId: user.userId };
   }
 

@@ -31,7 +31,10 @@ export const PERMISSIONS = {
   REMBOURSEMENT_CONFIRM: 'remboursement:confirm',
   // Reversements Jèko des ventes en ligne aux compagnies
   REVERSEMENT_READ: 'reversement:read', // consulter ceux de sa compagnie
-  REVERSEMENT_MANAGE: 'reversement:manage', // déclencher un transfert (admin plateforme)
+  REVERSEMENT_MANAGE: 'reversement:manage', // déclencher un transfert, traiter les demandes (admin plateforme)
+  REVERSEMENT_DEMANDER: 'reversement:demander', // demander un reversement pour sa compagnie
+  // Retrait de la part Yègo du magasin Jèko vers le numéro de Yègo (admin plateforme)
+  RETRAIT_MANAGE: 'retrait:manage',
   // Personnel
   AGENT_MANAGE: 'agent:manage', // gérer les agents guichet de sa compagnie
   // Abonnement plateforme
@@ -42,6 +45,7 @@ export const PERMISSIONS = {
   // Support (demandes d'assistance)
   SUPPORT_CREATE: 'support:create', // ouvrir une demande (voyageur, personnel compagnie)
   SUPPORT_MANAGE: 'support:manage', // voir et traiter toutes les demandes (admin plateforme uniquement)
+  SUPPORT_COMPAGNIE: 'support:compagnie', // voir et traiter les demandes des voyageurs liées à sa compagnie
   // Administration
   UTILISATEUR_LIST: 'utilisateur:list',
   UTILISATEUR_CREATE: 'utilisateur:create',
@@ -78,11 +82,13 @@ export const MATRICE_PERMISSIONS: Record<UserRole, Permission[] | typeof TOUTES>
     PERMISSIONS.TICKET_VALIDATE,
     PERMISSIONS.REMBOURSEMENT_CONFIRM,
     PERMISSIONS.REVERSEMENT_READ,
+    PERMISSIONS.REVERSEMENT_DEMANDER,
     PERMISSIONS.AGENT_MANAGE,
     PERMISSIONS.ABONNEMENT_READ,
     PERMISSIONS.UTILISATEUR_CREATE,
     PERMISSIONS.DASHBOARD_READ,
     PERMISSIONS.SUPPORT_CREATE,
+    PERMISSIONS.SUPPORT_COMPAGNIE,
   ],
 
   [UserRole.ADMIN]: TOUTES,

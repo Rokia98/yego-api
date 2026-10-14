@@ -5,6 +5,8 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
+import { Prisma } from '@prisma/client';
+import { ListeUtilisateursDto } from './dto/liste-utilisateurs.dto';
 import { PrismaService } from '../../prisma.service';
 import { ROLES_LIES_COMPAGNIE } from '../../config/constants';
 import { paginer } from '../../common/pagination';
@@ -53,11 +55,34 @@ export class UtilisateursService {
     });
   }
 
-  async findAll(skip = 0, take = 10) {
-    return this.prisma.utilisateur.findMany({
-      ...paginer(skip, take),
-      select: UTILISATEUR_SAFE_SELECT,
-    });
+  // Liste filtrée + total hors pagination (renvoyé en en-tête X-Total-Count).
+  async findAll(filtres: ListeUtilisateursDto = {}) {
+    const where: Prisma.UtilisateurWhereInput = {};
+    if (filtres.role) where.role = filtres.role;
+    if (filtres.compagnieId) where.compagnieId = filtres.compagnieId;
+    if (filtres.actif != null) where.actif = filtres.actif;
+    if (filtres.q) {
+      where.OR = [
+        { nom: { contains: filtres.q, mode: 'insensitive' } },
+        { telephone: { contains: filtres.q.replace(/\s+/g, '') } },
+        { email: { contains: filtres.q, mode: 'insensitive' } },
+      ];
+    }
+
+    const [total, utilisateurs] = await Promise.all([
+      this.prisma.utilisateur.count({ where }),
+      this.prisma.utilisateur.findMany({
+        where,
+        ...paginer(filtres.skip, filtres.take),
+        select: {
+          ...UTILISATEUR_SAFE_SELECT,
+          actif: true,
+          compagnie: { select: { id: true, nom: true } },
+        },
+        orderBy: { id: 'desc' },
+      }),
+    ]);
+    return { total, utilisateurs };
   }
 
   async findOne(id: number) {

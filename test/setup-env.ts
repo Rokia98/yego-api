@@ -21,6 +21,8 @@ for (const k of [
   'JEKO_ERROR_URL',
   'JEKO_API_URL',
   'REVERSEMENT_COMMISSION_POURCENT',
+  'RETRAIT_YEGO_TELEPHONE',
+  'JEKO_FRAIS_TRANSFERT_POURCENT',
   // Pas de vrai Firebase depuis les tests (push en mode journalisation).
   'FCM_PROJECT_ID',
   'FCM_CLIENT_EMAIL',

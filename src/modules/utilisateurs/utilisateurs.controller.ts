@@ -9,8 +9,11 @@ import {
   Patch,
   Post,
   Query,
+  Res,
   UseGuards,
 } from '@nestjs/common';
+import { Response } from 'express';
+import { ListeUtilisateursDto } from './dto/liste-utilisateurs.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { AutoriseMotDePasseTemporaire } from '../../common/decorators/mot-de-passe-temporaire.decorator';
@@ -38,11 +41,18 @@ export class UtilisateursController {
   }
 
   // Liste de tous les utilisateurs (PII) : administrateurs plateforme uniquement.
+  // Filtres role / compagnieId / actif / q ; le total hors pagination est
+  // renvoyé dans l'en-tête X-Total-Count (le corps reste un tableau).
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequirePermissions(PERMISSIONS.UTILISATEUR_LIST)
   @Get()
-  findAll(@Query('skip') skip = 0, @Query('take') take = 10) {
-    return this.utilisateursService.findAll(skip, take);
+  async findAll(
+    @Query() filtres: ListeUtilisateursDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const { total, utilisateurs } = await this.utilisateursService.findAll(filtres);
+    res.setHeader('X-Total-Count', total);
+    return utilisateurs;
   }
 
   // Attribution du rôle et de la compagnie de rattachement : admin plateforme.

@@ -40,5 +40,10 @@ export function confirmeParUssd(moyen: string): boolean {
   return moyen === 'mtn_money' || moyen === 'moov_money';
 }
 
+// Opérateurs du numéro Mobile Money de Yègo (RETRAIT_YEGO_TELEPHONE), sur
+// lequel arrivent les reversements à remettre aux compagnies et les retraits.
+export const MOYENS_ENCAISSEMENT_YEGO = ['wave', 'orange_money'] as const;
+export type MoyenEncaissementYego = (typeof MOYENS_ENCAISSEMENT_YEGO)[number];
+
 // Format exigé par Jèko pour un payeur / bénéficiaire mobile money ivoirien.
 export const TELEPHONE_MOBILE_MONEY_CI = /^\+225(01|05|07)[0-9]{8}$/;

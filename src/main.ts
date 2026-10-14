@@ -42,14 +42,17 @@ async function bootstrap() {
   // env.validation) ; '*' doit être demandé explicitement (dev uniquement,
   // refusé en production). Les apps mobiles ne sont pas concernées par CORS.
   const corsOrigin = config.get<string>('CORS_ORIGIN')?.trim();
+  // En-têtes de réponse lisibles par le dashboard (total des listes paginées).
+  const exposedHeaders = ['X-Total-Count'];
   if (!corsOrigin) {
     app.enableCors({ origin: false });
   } else if (corsOrigin === '*') {
-    app.enableCors({ origin: '*', credentials: false });
+    app.enableCors({ origin: '*', credentials: false, exposedHeaders });
   } else {
     app.enableCors({
       origin: corsOrigin.split(',').map((o) => o.trim()),
       credentials: true,
+      exposedHeaders,
     });
   }
 
