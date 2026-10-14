@@ -11,7 +11,7 @@ import { DashboardClassementDto } from './dto/dashboard-classement.dto';
 import { DashboardSerieDto } from './dto/dashboard-serie.dto';
 import { resoudreCompagnieCible } from '../../common/scope';
 import { ReversementsService } from '../reversements/reversements.service';
-import { ApercuReversementQuery } from '../reversements/dto/reversement.dto';
+import { DashboardSoldeDto } from './dto/dashboard-solde.dto';
 
 // Admin plateforme (toutes compagnies, filtrables) ou company_admin (la sienne).
 @Controller('dashboard')
@@ -47,11 +47,12 @@ export class DashboardController {
   @Get('solde')
   solde(
     @CurrentUser() user: AuthenticatedUser,
-    @Query() q: ApercuReversementQuery,
+    @Query() q: DashboardSoldeDto,
   ) {
     return this.reversements.soldeCompagnie(
       resoudreCompagnieCible(user, q.compagnieId),
       user,
+      { du: q.du, au: q.au },
     );
   }
 

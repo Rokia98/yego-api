@@ -1715,6 +1715,49 @@ describe('Yègo API (e2e)', () => {
 
   // ---------------------------------------------------------------------------
   describe('Dashboard', () => {
+    it('solde par canal : guichet (encaissé par la compagnie), en ligne, global', async () => {
+      const r = await http().get('/api/v1/dashboard/solde').set(auth('gestionnaire')).expect(200);
+      const where = {
+        jekoReference: null,
+        reservation: { depart: { trajet: { compagnieId: fx.compagnieId } } },
+      };
+      const payes = await prisma.paiement.aggregate({
+        where: { ...where, statut: 'paye' },
+        _sum: { montant: true },
+        _count: { _all: true },
+      });
+      expect(payes._count._all).toBeGreaterThan(0); // ventes guichet du parcours
+      const rembourses = await prisma.paiement.findMany({
+        where: { ...where, statut: 'rembourse' },
+        select: { reservation: { select: { remboursement: true } } },
+      });
+      const garde = rembourses.reduce(
+        (t, p) => t + Number(p.reservation.remboursement?.fraisRetenus ?? 0),
+        0,
+      );
+      const g = r.body.guichet;
+      expect(Number(g.encaisse)).toBe(Number(payes._sum.montant ?? 0) + garde);
+      expect(g.nombrePaiements).toBe(payes._count._all + rembourses.length);
+      const somme = Object.values(g.parMoyen as Record<string, string>).reduce(
+        (t, v) => t + Number(v),
+        0,
+      );
+      expect(somme).toBe(Number(g.encaisse));
+      expect(Number(r.body.global.total)).toBe(
+        Number(r.body.enLigne.total) + Number(g.encaisse),
+      );
+
+      // Période (date de paiement) : guichet seulement, global reste cumulé.
+      const vide = await http()
+        .get('/api/v1/dashboard/solde?du=2000-01-01&au=2000-01-02')
+        .set(auth('gestionnaire'))
+        .expect(200);
+      expect(vide.body.guichet).toMatchObject({ nombrePaiements: 0, parMoyen: {} });
+      expect(Number(vide.body.guichet.encaisse)).toBe(0);
+      expect(vide.body.global.total).toBe(r.body.global.total);
+      await http().get('/api/v1/dashboard/solde?du=hier').set(auth('gestionnaire')).expect(400);
+    });
+
     it('un agent n\'a pas accès (403)', () =>
       http().get('/api/v1/dashboard/resume').set(auth('agent')).expect(403));
 

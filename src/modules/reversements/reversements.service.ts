@@ -108,7 +108,11 @@ export class ReversementsService {
   // - enCoursDeReversement : transferts lancés, pas encore confirmés ;
   // - totalReverse : cumul des reversements effectués.
   // Les ventes au guichet n'y figurent pas : la compagnie les encaisse elle-même.
-  async soldeCompagnie(compagnieId: number, user: AuthenticatedUser) {
+  async soldeCompagnie(
+    compagnieId: number,
+    user: AuthenticatedUser,
+    periode?: { du?: string; au?: string },
+  ) {
     assertCompagnieScope(user, compagnieId);
     await this.compagnieOu404(compagnieId);
     const debutDuJour = this.debutDuJour();
@@ -210,6 +214,87 @@ export class ReversementsService {
       dernierReversement: dernier,
       // Demande faite par la compagnie, pas encore traitée par Yègo (ou null).
       demandeEnAttente,
+      ...(await this.soldeParCanal(
+        compagnieId,
+        [disponible, enAttente].reduce((t, b) => t.plus(detail(b).montantNet), zero)
+          .plus(reversements(aRemettre).montant)
+          .plus(reversements(remis).montant),
+        periode,
+      )),
+    };
+  }
+
+  // Ventes encaissées directement par la compagnie (paiements sans passage par
+  // Jèko : espèces ou mobile money reçus au comptoir), puis totaux.
+  // `periode` (sur la date de paiement) ne s'applique qu'au bloc guichet ;
+  // enLigne et global restent cumulés depuis le début.
+  private async soldeParCanal(
+    compagnieId: number,
+    enLigneTotal: Prisma.Decimal,
+    periode?: { du?: string; au?: string },
+  ) {
+    const zero = new Prisma.Decimal(0);
+    const base: Prisma.PaiementWhereInput = {
+      jekoReference: null,
+      reservation: { depart: { trajet: { compagnieId } } },
+    };
+    const datePaiement =
+      periode?.du || periode?.au
+        ? {
+            ...(periode.du && { gte: new Date(`${periode.du}T00:00:00.000Z`) }),
+            ...(periode.au && { lte: new Date(`${periode.au}T23:59:59.999Z`) }),
+          }
+        : undefined;
+
+    const calculer = async (filtreDate?: Prisma.DateTimeNullableFilter) => {
+      const where = { ...base, ...(filtreDate && { datePaiement: filtreDate }) };
+      const [payes, rembourses] = await Promise.all([
+        this.prisma.paiement.groupBy({
+          by: ['moyenPaiement'],
+          where: { ...where, statut: 'paye' },
+          _sum: { montant: true },
+          _count: { _all: true },
+        }),
+        this.prisma.paiement.findMany({
+          where: { ...where, statut: 'rembourse' },
+          select: {
+            moyenPaiement: true,
+            reservation: {
+              select: { remboursement: { select: { fraisRetenus: true, montantRembourse: true } } },
+            },
+          },
+        }),
+      ]);
+      const parMoyen: Record<string, Prisma.Decimal> = {};
+      const ajouter = (moyen: string, m: Prisma.Decimal) => {
+        parMoyen[moyen] = (parMoyen[moyen] ?? zero).plus(m);
+      };
+      let encaisse = zero;
+      let rembourse = zero;
+      let nombre = 0;
+      for (const g of payes) {
+        const m = g._sum.montant ?? zero;
+        encaisse = encaisse.plus(m);
+        nombre += g._count._all;
+        ajouter(g.moyenPaiement, m);
+      }
+      for (const p of rembourses) {
+        const r = p.reservation.remboursement;
+        const garde = r?.fraisRetenus ?? zero;
+        encaisse = encaisse.plus(garde);
+        rembourse = rembourse.plus(r?.montantRembourse ?? zero);
+        nombre += 1;
+        ajouter(p.moyenPaiement, garde);
+      }
+      return { nombrePaiements: nombre, encaisse, rembourse, parMoyen };
+    };
+
+    const guichet = await calculer(datePaiement);
+    const guichetCumul = datePaiement ? (await calculer()).encaisse : guichet.encaisse;
+    return {
+      guichet,
+      enLigne: { total: enLigneTotal },
+      global: { total: enLigneTotal.plus(guichetCumul) },
     };
   }
 
