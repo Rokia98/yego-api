@@ -94,7 +94,7 @@ export class ReversementsController {
     @Body() dto: DemanderReversementDto,
     @Ip() ip: string,
   ) {
-    return this.reversements.demander(user, dto.commentaire, ip);
+    return this.reversements.demander(user, dto, ip);
   }
 
   // Admin : toutes (filtre ?compagnieId) ; gestionnaire : celles de sa compagnie.

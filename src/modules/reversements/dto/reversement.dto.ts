@@ -89,6 +89,13 @@ export class DemanderReversementDto {
   @IsString()
   @MaxLength(500)
   commentaire?: string;
+
+  // Absent = tout le disponible. Plafond du reversement (billets entiers).
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(100)
+  montant?: number;
 }
 
 export class RejeterDemandeReversementDto {

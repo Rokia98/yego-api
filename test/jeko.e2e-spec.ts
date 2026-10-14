@@ -878,6 +878,78 @@ describe('Intégration Jèko (e2e)', () => {
         'rejetee',
       ]);
     });
+
+    it('montant choisi par la compagnie : billets entiers, les plus anciens d’abord', async () => {
+      // Deux billets éligibles : 8 000 (plus ancien, net 7 200) puis 3 000 (net 2 700).
+      const billet = async (montant: number, datePaiement: Date) => {
+        const resa = await prisma.reservation.create({
+          data: {
+            utilisateurId: (await prisma.utilisateur.findFirstOrThrow({ where: { role: 'user' } })).id,
+            departId: fx.departId,
+            nombrePlaces: 1,
+            canal: 'en_ligne',
+            statut: 'confirmee',
+          },
+        });
+        await prisma.paiement.create({
+          data: {
+            reservationId: resa.id,
+            montant,
+            moyenPaiement: 'wave',
+            statut: 'paye',
+            datePaiement,
+            jekoReference: `YEGO-P${resa.id}000-T1`,
+          },
+        });
+      };
+      await billet(8000, new Date(Date.now() - 3600_000));
+      await billet(3000, new Date());
+      const demander = (corps: object) =>
+        http().post('/api/v1/reversements/demandes').set(auth('gestionnaire')).send(corps);
+
+      expect((await demander({ montant: 50 })).status).toBe(400); // minimum 100
+      const trop = await demander({ montant: 10_000 });
+      expect(trop.status).toBe(400);
+      expect(trop.body.message).toMatch(/9900/);
+
+      // 5 000 : le plus ancien billet (7 200 net) ne tient pas → 400 explicite,
+      // la demande reste en attente.
+      const petite = await demander({ montant: 5000 });
+      expect(petite.status).toBe(201);
+      expect(petite.body).toMatchObject({ montantDemande: '5000' });
+      expect(Number(petite.body.montantNetEstime)).toBe(9900);
+      const refus = await http()
+        .post(`/api/v1/reversements/demandes/${petite.body.id}/approuver`)
+        .set(auth('admin'))
+        .send({ moyen: 'wave' })
+        .expect(400);
+      expect(refus.body.message).toMatch(/billet entier/);
+      expect(
+        (await prisma.demandeReversement.findUniqueOrThrow({ where: { id: petite.body.id } })).statut,
+      ).toBe('en_attente');
+      const solde = await http().get('/api/v1/dashboard/solde').set(auth('gestionnaire')).expect(200);
+      expect(solde.body.demandeEnAttente.montantDemande).toBe('5000');
+      await http()
+        .post(`/api/v1/reversements/demandes/${petite.body.id}/annuler`)
+        .set(auth('gestionnaire'))
+        .expect(201);
+
+      // 8 000 : seul le billet de 8 000 (7 200 net) tient ; celui de 3 000 reste disponible.
+      const d = await demander({ montant: 8000 });
+      expect(d.status).toBe(201);
+      const ok = await http()
+        .post(`/api/v1/reversements/demandes/${d.body.id}/approuver`)
+        .set(auth('admin'))
+        .send({ moyen: 'wave' })
+        .expect(201);
+      expect(ok.body.montantDemande).toBe('8000');
+      expect(ok.body.reversement).toMatchObject({ nombrePaiements: 1 });
+      expect(Number(ok.body.reversement.montantNet)).toBe(7200);
+      await webhook(transfert(`YEGO-RV${ok.body.reversementId}`, 'success')).expect(200);
+      const apres = await http().get('/api/v1/dashboard/solde').set(auth('gestionnaire')).expect(200);
+      expect(Number(apres.body.disponible.montantNet)).toBe(2700);
+      expect(apres.body.demandeEnAttente).toBeNull();
+    });
   });
 
   // ---------------------------------------------------------------------------

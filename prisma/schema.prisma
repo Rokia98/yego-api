@@ -495,6 +495,9 @@ model DemandeReversement {
   // Net reversable au moment de la demande (indicatif : le montant réel est
   // recalculé à l'approbation).
   montantNetEstime Decimal      @map("montant_net_estime") @db.Decimal(12, 2)
+  // Montant choisi par la compagnie (NULL = tout le disponible) : plafond du
+  // reversement à l'approbation, en billets entiers.
+  montantDemande   Decimal?     @map("montant_demande") @db.Decimal(12, 2)
   commentaire      String?
   motifRejet       String?      @map("motif_rejet")
   demandeParId     Int?         @map("demande_par_id")

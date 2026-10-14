@@ -156,7 +156,7 @@ export class ReversementsService {
       }),
       this.prisma.demandeReversement.findFirst({
         where: { compagnieId, statut: 'en_attente' },
-        select: { id: true, montantNetEstime: true, dateDemande: true },
+        select: { id: true, montantNetEstime: true, montantDemande: true, dateDemande: true },
       }),
     ]);
 
@@ -219,7 +219,12 @@ export class ReversementsService {
   // Le transfert Jèko part vers le numéro Wave / Orange Money de Yègo
   // (RETRAIT_YEGO_TELEPHONE), jamais vers la compagnie : l'admin lui remet
   // ensuite l'argent en main propre, puis le déclare (marquerRemis).
-  async creer(compagnieId: number, moyen: MoyenEncaissementYego, ctx: ActeurContexte) {
+  async creer(
+    compagnieId: number,
+    moyen: MoyenEncaissementYego,
+    ctx: ActeurContexte,
+    montantDemande?: Prisma.Decimal | null,
+  ) {
     if (!this.jeko.estConfigure()) {
       throw new BadRequestException('Jèko n’est pas configuré sur cette API');
     }
@@ -232,8 +237,13 @@ export class ReversementsService {
     const moyenJeko = versMoyenJeko(moyen)!;
     const compagnie = await this.compagnieOu404(compagnieId);
 
-    const lot = await this.calculerLot(compagnieId);
+    const lot = await this.calculerLot(compagnieId, montantDemande ?? undefined);
     if (lot.paiementIds.length === 0) {
+      if (montantDemande != null && (await this.calculerLot(compagnieId)).paiementIds.length > 0) {
+        throw new BadRequestException(
+          `Aucun billet entier ne tient dans le montant demandé (${montantDemande} FCFA) : le plus ancien billet disponible le dépasse. La demande reste en attente ; la compagnie peut l'annuler et redemander un montant plus élevé.`,
+        );
+      }
       throw new BadRequestException('Aucun paiement à reverser pour cette compagnie');
     }
     const minimum = MINIMUM_TRANSFERT_FCFA[moyen] ?? MINIMUM_PAR_DEFAUT_FCFA;
@@ -349,7 +359,14 @@ export class ReversementsService {
   // Demandes de reversement : la compagnie demande, l'admin approuve (ce qui
   // lance creer()) ou rejette.
 
-  async demander(user: AuthenticatedUser, commentaire: string | undefined, ip?: string) {
+  // montant absent = tout le disponible ; sinon plafond (billets entiers) du
+  // reversement qui sera fait à l'approbation.
+  async demander(
+    user: AuthenticatedUser,
+    dto: { commentaire?: string; montant?: number },
+    ip?: string,
+  ) {
+    const { commentaire } = dto;
     const compagnieId = user.compagnieId;
     if (compagnieId == null) {
       throw new ForbiddenException("Votre compte n'est rattaché à aucune compagnie");
@@ -358,6 +375,12 @@ export class ReversementsService {
     const lot = await this.calculerLot(compagnieId);
     if (lot.paiementIds.length === 0 || lot.montantNet.lessThanOrEqualTo(0)) {
       throw new BadRequestException('Aucun montant disponible à reverser pour le moment');
+    }
+    const montantDemande = dto.montant != null ? new Prisma.Decimal(dto.montant) : null;
+    if (montantDemande && montantDemande.greaterThan(lot.montantNet)) {
+      throw new BadRequestException(
+        `Montant demandé supérieur au disponible (${lot.montantNet} FCFA)`,
+      );
     }
     // Verrou par compagnie : deux clics simultanés ne créent pas deux
     // demandes en attente.
@@ -376,6 +399,7 @@ export class ReversementsService {
         data: {
           compagnieId,
           montantNetEstime: lot.montantNet,
+          montantDemande,
           commentaire,
           demandeParId: user.userId,
         },
@@ -390,7 +414,7 @@ export class ReversementsService {
       await this.notifications.notifier(a.id, {
         type: 'reversement.demande',
         titre: 'Demande de reversement',
-        corps: `${compagnie.nom} demande le reversement de ${lot.montantNet} FCFA.`,
+        corps: `${compagnie.nom} demande le reversement de ${montantDemande ?? lot.montantNet} FCFA.`,
         donnees: { compagnieId, demandeId: demande.id },
       });
     }
@@ -401,7 +425,11 @@ export class ReversementsService {
       acteurId: user.userId,
       acteurRole: user.role,
       ip,
-      metadata: { compagnieId, montantNetEstime: lot.montantNet.toString() },
+      metadata: {
+        compagnieId,
+        montantNetEstime: lot.montantNet.toString(),
+        montantDemande: montantDemande?.toString() ?? null,
+      },
     });
     return demande;
   }
@@ -435,7 +463,7 @@ export class ReversementsService {
   // pas partir (solde Jèko, opérateur…), la demande reste en attente.
   async approuverDemande(id: number, moyen: MoyenEncaissementYego, ctx: ActeurContexte) {
     const demande = await this.demandeEnAttente(id);
-    await this.creer(demande.compagnieId, moyen, ctx);
+    await this.creer(demande.compagnieId, moyen, ctx, demande.montantDemande);
     return this.prisma.demandeReversement.findUniqueOrThrow({
       where: { id },
       include: { reversement: true },
@@ -714,7 +742,9 @@ export class ReversementsService {
 
   // ---------------------------------------------------------------------------
 
-  private async calculerLot(compagnieId: number): Promise<Lot> {
+  // plafondNet : montant demandé par la compagnie — billets entiers, les plus
+  // anciens d'abord, tant que le net cumulé ne le dépasse pas.
+  private async calculerLot(compagnieId: number, plafondNet?: Prisma.Decimal): Promise<Lot> {
     const debutDuJour = this.debutDuJour();
     const paiements = await this.prisma.paiement.findMany({
       where: {
@@ -749,7 +779,11 @@ export class ReversementsService {
         p.statut === 'paye'
           ? p.montant
           : (p.reservation.remboursement?.fraisRetenus ?? new Prisma.Decimal(0));
-      if (montantBrut.plus(part).greaterThan(PLAFOND_TRANSFERT_FCFA)) {
+      const brutSuivant = montantBrut.plus(part);
+      if (
+        brutSuivant.greaterThan(PLAFOND_TRANSFERT_FCFA) ||
+        (plafondNet != null && brutSuivant.minus(this.commissionSur(brutSuivant)).greaterThan(plafondNet))
+      ) {
         plafondAtteint = true;
         break;
       }
