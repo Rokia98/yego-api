@@ -50,6 +50,9 @@ export class UtilisateursService {
         telephone: dto.telephone,
         email: dto.email,
         motDePasseHash,
+        // Mot de passe choisi par l'agent (qui le connaît) : le voyageur doit
+        // le remplacer à sa première connexion.
+        doitChangerMotDePasse: motDePasseHash != null,
       },
       select: UTILISATEUR_SAFE_SELECT,
     });

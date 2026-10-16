@@ -40,6 +40,7 @@ describe('ReservationsService.creerAuGuichet', () => {
 
   beforeEach(() => {
     tx = {
+      $queryRaw: jest.fn().mockResolvedValue([]),
       depart: {
         findUnique: jest.fn().mockResolvedValue(departCompagnie1),
         update: jest.fn().mockResolvedValue({}),
@@ -153,6 +154,81 @@ describe('ReservationsService.creerAuGuichet', () => {
     await expect(service.creerAuGuichet(dto, agent(1))).rejects.toBeInstanceOf(
       BadRequestException,
     );
+    expect(tx.reservation.create).not.toHaveBeenCalled();
+  });
+});
+
+describe('ReservationsService.create — réservation en ligne', () => {
+  let tx: any;
+  let service: ReservationsService;
+
+  beforeEach(() => {
+    tx = {
+      $queryRaw: jest.fn().mockResolvedValue([]),
+      depart: {
+        findUnique: jest.fn().mockResolvedValue({ id: 1, placesDisponibles: 10 }),
+        update: jest.fn().mockResolvedValue({}),
+      },
+      reservation: {
+        count: jest.fn().mockResolvedValue(0),
+        create: jest.fn().mockResolvedValue({
+          id: 100,
+          depart: {
+            trajet: { villeDepart: { nom: 'Abidjan' }, villeArrivee: { nom: 'Bouaké' } },
+          },
+        }),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      ticket: { findMany: jest.fn().mockResolvedValue([]) },
+    };
+    const prisma: any = {
+      $transaction: jest.fn((cb: any) => cb(tx)),
+      depart: {
+        findUnique: jest.fn().mockResolvedValue({
+          statut: 'planifie',
+          dateDepart: new Date(Date.now() + 5 * 86_400_000),
+          trajet: { statut: 'actif', compagnieId: 1, heureDepart: new Date('1970-01-01T08:00:00Z') },
+        }),
+      },
+      compagnie: {
+        findUnique: jest
+          .fn()
+          .mockResolvedValue({ statut: 'actif', abonnements: [{ id: 1 }] }),
+      },
+    };
+    service = new ReservationsService(
+      prisma,
+      { record: jest.fn() } as never,
+      { notifier: jest.fn().mockResolvedValue(undefined) } as never,
+    );
+  });
+
+  it('verrouille le compte puis le départ avant de vendre', async () => {
+    await service.create({ departId: 1, nombrePlaces: 1 }, 42);
+
+    const requetes = tx.$queryRaw.mock.calls.map((c: any[]) => c[0].join('?'));
+    expect(requetes[0]).toContain('FROM utilisateurs');
+    expect(requetes[1]).toContain('FROM departs');
+    expect(requetes.every((q: string) => q.includes('FOR UPDATE'))).toBe(true);
+    expect(tx.reservation.create).toHaveBeenCalled();
+  });
+
+  it('refuse (409) au-delà de 5 réservations non payées pour le même compte', async () => {
+    tx.reservation.count.mockResolvedValue(5);
+
+    await expect(
+      service.create({ departId: 1, nombrePlaces: 1 }, 42),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(tx.reservation.create).not.toHaveBeenCalled();
+    expect(tx.depart.update).not.toHaveBeenCalled();
+  });
+
+  it("refuse (400) quand les places restantes ne suffisent plus (relues sous verrou)", async () => {
+    tx.depart.findUnique.mockResolvedValue({ id: 1, placesDisponibles: 1 });
+
+    await expect(
+      service.create({ departId: 1, nombrePlaces: 2 }, 42),
+    ).rejects.toBeInstanceOf(BadRequestException);
     expect(tx.reservation.create).not.toHaveBeenCalled();
   });
 });

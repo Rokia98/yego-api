@@ -1,5 +1,31 @@
 # Changelog - Yègo API
 
+## [0.30.1] - 2026-10-15
+
+### 🔒 Audit de sécurité du 2026-10-15
+- **Tickets en double (élevé)** : `POST /tickets/reservation/:id` verrouille le
+  départ (`SELECT … FOR UPDATE`) et recompte les tickets dans la transaction.
+  Avant : 5 requêtes simultanées pour 1 place payée donnaient plusieurs QR
+  valides (reproduit en e2e : 3 tickets).
+- **Survente (élevé)** : réservation en ligne et guichet verrouillent la ligne
+  du départ avant de contrôler places et sièges.
+- **Plafond de 5 réservations en ligne non payées par compte** (409) :
+  contrôle sous verrou du compte, tient en rafale.
+- **Fuite** : `GET /compagnies`, `/compagnies/:id` et `/compagnies/statut/:statut`
+  (publics) ne renvoient plus `reversementTelephone`, `reversementMoyen`,
+  `jekoContactId`. Le personnel de la compagnie et l'admin voient toujours les
+  coordonnées sur `/:id` ; `/statut/:statut` est paginé.
+- **Remboursement manuel** d'un billet payé via Jèko et non reversé : admin
+  plateforme uniquement (403 pour le gestionnaire, qui passe par le mode `jeko`).
+- `POST /utilisateurs` avec mot de passe choisi par l'agent :
+  `doitChangerMotDePasse = true`.
+- Auth : login à temps constant (hash factice si numéro inconnu, compte
+  désactivé signalé seulement après un mot de passe correct) ; refresh
+  atomique (deux refresh simultanés du même jeton → un seul réussit) et refusé
+  pour un compte désactivé.
+- Dépendances : `proxy-addr` 2.0.8 (critique), override `qs` ^6.16.1. Restent
+  des failles moyennes liées à NestJS 10 (migration vers NestJS 12 à part).
+
 ## [0.27.0] - 2026-09-25
 
 ### 🛟 Module Support (demandes d'assistance) — contrat proposé par yego-dashboard

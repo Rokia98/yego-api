@@ -131,17 +131,46 @@ describe('AuthService', () => {
         role: 'user',
         compagnieId: null,
         tokenVersion: 0,
+        actif: true,
       });
+      prisma.refreshToken.updateMany.mockResolvedValue({ count: 1 });
 
       const res = await service.refresh('b'.repeat(64));
 
       expect(res.refreshToken).toEqual(expect.any(String));
+      expect(prisma.refreshToken.updateMany).toHaveBeenCalledWith({
+        where: { id: 10, revokedAt: null },
+        data: { revokedAt: expect.any(Date) },
+      });
       expect(prisma.refreshToken.update).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: 10 },
-          data: expect.objectContaining({ revokedAt: expect.any(Date) }),
+          data: expect.objectContaining({ remplacePar: expect.anything() }),
         }),
       );
+    });
+
+    it("refuse un second refresh simultané avec le même jeton (déjà consommé)", async () => {
+      prisma.refreshToken.findUnique.mockResolvedValue({
+        id: 10,
+        utilisateurId: 3,
+        revokedAt: null,
+        expiresAt: new Date(Date.now() + 100000),
+      });
+      prisma.utilisateur.findUnique.mockResolvedValue({
+        id: 3,
+        telephone: '+2250700000000',
+        role: 'user',
+        compagnieId: null,
+        tokenVersion: 0,
+        actif: true,
+      });
+      prisma.refreshToken.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(service.refresh('b'.repeat(64))).rejects.toBeInstanceOf(
+        UnauthorizedException,
+      );
+      expect(prisma.refreshToken.create).not.toHaveBeenCalled();
     });
   });
 

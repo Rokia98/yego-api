@@ -805,8 +805,8 @@ describe('Yègo API (e2e)', () => {
       const resa = await http()
         .post('/api/v1/reservations')
         .set(auth('voyageur'))
-        .send({ departId: fx.departFuturId, nombrePlaces: 1 })
-        .expect(201);
+        .send({ departId: fx.departFuturId, nombrePlaces: 1 });
+      expect(resa.body).toMatchObject({ id: expect.any(Number) });
       await http()
         .post('/api/v1/paiements')
         .set(auth('voyageur'))
@@ -2025,5 +2025,126 @@ describe('Yègo API (e2e)', () => {
         .send({ heureDepart: '08:30' })
         .expect(200)
         .then((r) => expect(r.body.heureDepart).toContain('08:30')));
+  });
+
+  // ---------------------------------------------------------------------------
+  describe('Audit sécurité 2026-10-15 (concurrence, plafonds, fuites)', () => {
+    let n = 0;
+    // Voyageur neuf à chaque appel (créé en base, jeton signé : pas de quota
+    // /auth/register) — n'interfère pas avec le plafond des autres comptes.
+    const nouveauVoyageur = async () => {
+      n += 1;
+      const u = await prisma.utilisateur.create({
+        data: { nom: `Voyageur audit ${n}`, telephone: `+225070155${String(n).padStart(4, '0')}`, role: 'user' },
+      });
+      const jeton = app.get(JwtService).sign({
+        sub: u.id, telephone: u.telephone, role: 'user', cid: null, tv: 0, pwTmp: false,
+      });
+      return { Authorization: `Bearer ${jeton}` };
+    };
+
+    // Départ neuf (date unique) : l'état des départs de la fixture dépend des
+    // tests précédents.
+    let jours = 40;
+    const nouveauDepart = async (places: number) => {
+      const { trajetId } = await prisma.depart.findUniqueOrThrow({ where: { id: fx.departFuturId } });
+      jours += 1;
+      const now = new Date();
+      return prisma.depart.create({
+        data: {
+          trajetId,
+          dateDepart: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + jours)),
+          placesTotales: places,
+          placesDisponibles: places,
+          statut: 'planifie',
+        },
+      });
+    };
+
+    const reserverEtPayer = async (headers: Record<string, string>) => {
+      const depart = await nouveauDepart(10);
+      const resa = await http()
+        .post('/api/v1/reservations')
+        .set(headers)
+        .send({ departId: depart.id, nombrePlaces: 1 });
+      expect(resa.body).toMatchObject({ id: expect.any(Number) });
+      await http()
+        .post('/api/v1/paiements')
+        .set(headers)
+        .send({ reservationId: resa.body.id, moyenPaiement: 'wave' })
+        .expect(201);
+      await http()
+        .post(`/api/v1/paiements/reservation/${resa.body.id}/simuler`)
+        .set(headers)
+        .send({ resultat: 'succes' })
+        .expect(201);
+      return resa.body.id as number;
+    };
+
+    it('5 générations de ticket simultanées pour 1 place payée → 1 seul ticket', async () => {
+      const v = await nouveauVoyageur();
+      const id = await reserverEtPayer(v);
+
+      const reponses = await Promise.all(
+        Array.from({ length: 5 }, () =>
+          http().post(`/api/v1/tickets/reservation/${id}`).set(v).send({}),
+        ),
+      );
+      expect(reponses.filter((r) => r.status === 201)).toHaveLength(1);
+      expect(reponses.filter((r) => r.status === 400)).toHaveLength(4);
+      expect(await prisma.ticket.count({ where: { reservationId: id } })).toBe(1);
+    });
+
+    it('dernière place réservée par 2 voyageurs en même temps → 1 seul réussit', async () => {
+      const depart = await nouveauDepart(1);
+      const [a, b] = [await nouveauVoyageur(), await nouveauVoyageur()];
+
+      const reponses = await Promise.all(
+        [a, b].map((v) =>
+          http().post('/api/v1/reservations').set(v).send({ departId: depart.id, nombrePlaces: 1 }),
+        ),
+      );
+      expect(reponses.map((r) => r.status).sort()).toEqual([201, 400]);
+      const apres = await prisma.depart.findUniqueOrThrow({ where: { id: depart.id } });
+      expect(apres.placesDisponibles).toBe(0);
+    });
+
+    it('6e réservation non payée du même compte → 409 (plafond 5), y compris en rafale', async () => {
+      const v = await nouveauVoyageur();
+      const depart = await nouveauDepart(20);
+      const reponses = await Promise.all(
+        Array.from({ length: 7 }, () =>
+          http().post('/api/v1/reservations').set(v).send({ departId: depart.id, nombrePlaces: 1 }),
+        ),
+      );
+      expect(reponses.filter((r) => r.status === 201)).toHaveLength(5);
+      expect(reponses.filter((r) => r.status === 409)).toHaveLength(2);
+    });
+
+    it('GET /compagnies public ne divulgue plus le numéro de reversement', async () => {
+      await prisma.compagnie.update({
+        where: { id: fx.compagnieId },
+        data: { reversementMoyen: 'wave', reversementTelephone: '+2250701020304', jekoContactId: 'ctc_secret' },
+      });
+      const fuite = (corps: unknown) =>
+        /reversementTelephone|jekoContactId|0701020304|ctc_secret/.test(JSON.stringify(corps));
+
+      expect(fuite((await http().get('/api/v1/compagnies').expect(200)).body)).toBe(false);
+      expect(fuite((await http().get(`/api/v1/compagnies/${fx.compagnieId}`).expect(200)).body)).toBe(false);
+      expect(fuite((await http().get('/api/v1/compagnies/statut/actif').expect(200)).body)).toBe(false);
+      // Le gestionnaire de la compagnie, lui, voit ses coordonnées.
+      const perso = await http().get(`/api/v1/compagnies/${fx.compagnieId}`).set(auth('gestionnaire')).expect(200);
+      expect(perso.body.reversementTelephone).toBe('+2250701020304');
+      expect(perso.body.jekoContactId).toBeUndefined();
+    });
+
+    it('compte créé par un agent avec mot de passe : changement imposé à la 1re connexion', async () => {
+      const res = await http()
+        .post('/api/v1/utilisateurs')
+        .set(auth('agent'))
+        .send({ nom: 'Client Guichet', telephone: '+2250701999888', motDePasse: 'ChoisiParAgent1' })
+        .expect(201);
+      expect(res.body.doitChangerMotDePasse).toBe(true);
+    });
   });
 });

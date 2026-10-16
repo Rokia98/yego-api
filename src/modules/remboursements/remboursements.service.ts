@@ -227,6 +227,21 @@ export class RemboursementsService {
       return this.transfererRemboursement(remboursement, ctx);
     }
 
+    // Billet encaissé via Jèko et pas encore reversé : l'argent est chez Yègo.
+    // Le déclarer « remboursé à la main » par la compagnie laisserait le
+    // voyageur sans garantie d'être payé et l'argent compté comme part Yègo :
+    // seule l'équipe Yègo peut le faire (après un décaissement réel).
+    if (
+      user.role !== UserRole.ADMIN &&
+      paiement?.jekoReference &&
+      paiement.reversementId == null &&
+      remboursement.montantRembourse.greaterThan(0)
+    ) {
+      throw new ForbiddenException(
+        "Ce billet a été payé en ligne : le remboursement part automatiquement sur le Mobile Money du voyageur (mode 'jeko'). Contactez l'équipe Yègo pour un remboursement manuel.",
+      );
+    }
+
     return this.finaliser(remboursement, ctx, 'manuel');
   }
 

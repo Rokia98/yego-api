@@ -28,6 +28,28 @@ const INCLUDE_COMPLET = {
   trajets: true,
 };
 
+// Champs publics d'une compagnie. Jamais le compte de reversement
+// (reversementTelephone / reversementMoyen / jekoContactId) : un numéro Mobile
+// Money exposé à tous sert d'appât aux arnaques (« ici Yègo, donnez le code »).
+const CHAMPS_PUBLICS = {
+  id: true,
+  nom: true,
+  telephone: true,
+  email: true,
+  logoUrl: true,
+  statut: true,
+  dateCreation: true,
+} satisfies Prisma.CompagnieSelect;
+
+// Personnel habilité (admin plateforme, personnel de la compagnie) : en plus,
+// les coordonnées de reversement.
+const CHAMPS_HABILITES = {
+  ...CHAMPS_PUBLICS,
+  reversementMoyen: true,
+  reversementTelephone: true,
+  reversementCoordonneesModifieesLe: true,
+} satisfies Prisma.CompagnieSelect;
+
 // Gestionnaire(s) de la compagnie. Le numéro (qui sert aussi d'identifiant de
 // connexion) n'est inclus que pour le personnel habilité — voir findOne.
 const gestionnaires = (avecTelephone: boolean) => ({
@@ -52,7 +74,7 @@ export class CompagniesService {
   findAll(skip = 0, take = 10) {
     return this.prisma.compagnie.findMany({
       ...paginer(skip, take),
-      include: INCLUDE_COMPLET,
+      select: { ...CHAMPS_PUBLICS, ...INCLUDE_COMPLET },
     });
   }
 
@@ -66,7 +88,11 @@ export class CompagniesService {
         user.compagnieId === id);
     const compagnie = await this.prisma.compagnie.findUnique({
       where: { id },
-      include: { ...INCLUDE_COMPLET, ...gestionnaires(habilite) },
+      select: {
+        ...(habilite ? CHAMPS_HABILITES : CHAMPS_PUBLICS),
+        ...INCLUDE_COMPLET,
+        ...gestionnaires(habilite),
+      },
     });
 
     if (!compagnie) throw new NotFoundException('Compagnie introuvable');
@@ -74,7 +100,11 @@ export class CompagniesService {
   }
 
   findByStatut(statut: string, skip = 0, take = 10) {
-    return this.prisma.compagnie.findMany({ where: { statut }, skip, take });
+    return this.prisma.compagnie.findMany({
+      where: { statut },
+      ...paginer(skip, take),
+      select: CHAMPS_PUBLICS,
+    });
   }
 
   // Mise à jour des informations : l'admin plateforme pour toutes, un

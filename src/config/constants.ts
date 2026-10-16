@@ -56,6 +56,10 @@ export const FRAIS_ANNULATION = [
 // Départ déjà passé : aucun remboursement (100 % de frais).
 export const FRAIS_ANNULATION_DEPART_PASSE = 1;
 
+// Réservations en ligne non payées (et non expirées) qu'un même compte peut
+// détenir à la fois : empêche de bloquer les sièges d'un car sans payer.
+export const MAX_RESERVATIONS_IMPAYEES = 5;
+
 export enum PaiementStatut {
   EN_ATTENTE = 'en_attente',
   PAYE = 'paye',

@@ -12,6 +12,7 @@ import {
   DepartStatut,
   FRAIS_ANNULATION,
   FRAIS_ANNULATION_DEPART_PASSE,
+  MAX_RESERVATIONS_IMPAYEES,
   ReservationStatut,
   TicketStatut,
   UserRole,
@@ -82,8 +83,24 @@ export class ReservationsService {
     await assertCompagnieOperationnelle(this.prisma, departInfo.trajet.compagnieId);
 
     const reservation = await this.prisma.$transaction(async (tx) => {
-      const depart = await tx.depart.findUnique({ where: { id: dto.departId } });
-      if (!depart) throw new NotFoundException('Départ introuvable');
+      // Verrou du compte puis du départ (toujours dans cet ordre) : le plafond
+      // de réservations impayées, les places et les sièges sont contrôlés sans
+      // qu'une requête parallèle puisse passer entre la lecture et l'écriture.
+      await tx.$queryRaw`SELECT id FROM utilisateurs WHERE id = ${utilisateurId} FOR UPDATE`;
+      const impayees = await tx.reservation.count({
+        where: {
+          utilisateurId,
+          statut: ReservationStatut.CONFIRMEE,
+          OR: [{ paiement: { is: null } }, { paiement: { statut: { not: 'paye' } } }],
+        },
+      });
+      if (impayees >= MAX_RESERVATIONS_IMPAYEES) {
+        throw new ConflictException(
+          `Vous avez déjà ${impayees} réservations non payées : réglez-en ou annulez-en une avant d'en créer une nouvelle`,
+        );
+      }
+
+      const depart = await this.verrouillerDepart(tx, dto.departId);
       if (depart.placesDisponibles < dto.nombrePlaces) {
         throw new BadRequestException('Places insuffisantes pour ce départ');
       }
@@ -138,6 +155,7 @@ export class ReservationsService {
     await assertCompagnieOperationnelle(this.prisma, departInfo.trajet.compagnieId);
 
     const resultat = await this.prisma.$transaction(async (tx) => {
+      await this.verrouillerDepart(tx, dto.departId);
       const depart = await tx.depart.findUnique({
         where: { id: dto.departId },
         include: { trajet: { select: { compagnieId: true, prix: true } } },
@@ -344,6 +362,16 @@ export class ReservationsService {
     });
 
     return { ...resultat.reservation, remboursement: resultat.remboursement };
+  }
+
+  // Verrouille la ligne du départ jusqu'à la fin de la transaction (SELECT …
+  // FOR UPDATE) puis la relit : deux ventes simultanées de la dernière place
+  // (ou du même siège) ne peuvent plus réussir toutes les deux.
+  private async verrouillerDepart(tx: Prisma.TransactionClient, departId: number) {
+    await tx.$queryRaw`SELECT id FROM departs WHERE id = ${departId} FOR UPDATE`;
+    const depart = await tx.depart.findUnique({ where: { id: departId } });
+    if (!depart) throw new NotFoundException('Départ introuvable');
+    return depart;
   }
 
   // Valide les sièges choisis avant paiement : soit aucun (placement libre),

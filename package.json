@@ -1,6 +1,6 @@
 {
   "name": "yego-api",
-  "version": "0.30.0",
+  "version": "0.30.1",
   "description": "API back-end de la plateforme Yègo (réservation de tickets de transport)",
   "license": "UNLICENSED",
   "scripts": {
@@ -102,7 +102,8 @@
       "rimraf": {
         "glob": "^10.5.0"
       }
-    }
+    },
+    "qs": "^6.16.1"
   },
   "engines": {
     "node": ">=22"

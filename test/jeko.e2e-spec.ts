@@ -512,11 +512,16 @@ describe('Intégration Jèko (e2e)', () => {
       expect(fin.statut).toBe('rembourse');
     });
 
-    it('mode manuel reste possible (décaissement hors plateforme)', async () => {
+    it("mode manuel : refusé à la compagnie (l'argent est chez Yègo), possible pour l'admin", async () => {
       const { remboursement } = await payerEnLigne();
-      const res = await http()
+      await http()
         .patch(`/api/v1/remboursements/${remboursement.id}/confirmer`)
         .set(auth('gestionnaire'))
+        .send({ mode: 'manuel' })
+        .expect(403);
+      const res = await http()
+        .patch(`/api/v1/remboursements/${remboursement.id}/confirmer`)
+        .set(auth('admin'))
         .send({ mode: 'manuel' })
         .expect(200);
       expect(res.body.statut).toBe('rembourse');

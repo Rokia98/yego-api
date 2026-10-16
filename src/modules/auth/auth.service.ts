@@ -16,6 +16,14 @@ import { JwtPayload } from './strategies/jwt.strategy';
 
 const BCRYPT_ROUNDS = 12;
 
+// Hash d'un secret aléatoire jamais divulgué, calculé une fois (même coût
+// qu'un vrai mot de passe).
+let hashFactice$: Promise<string> | null = null;
+function hashFactice(): Promise<string> {
+  hashFactice$ ??= bcrypt.hash(randomBytes(32).toString('hex'), BCRYPT_ROUNDS);
+  return hashFactice$;
+}
+
 export interface ContexteRequete {
   ip?: string;
   userAgent?: string;
@@ -64,19 +72,17 @@ export class AuthService {
     const utilisateur = await this.prisma.utilisateur.findUnique({
       where: { telephone: dto.telephone },
     });
-    if (!utilisateur || !utilisateur.motDePasseHash) {
+    // Compte inconnu : on compare quand même à un hash factice, pour que le
+    // temps de réponse ne révèle pas quels numéros ont un compte.
+    const motDePasseValide = await bcrypt.compare(
+      dto.motDePasse,
+      utilisateur?.motDePasseHash ?? (await hashFactice()),
+    );
+    if (!utilisateur?.motDePasseHash || !motDePasseValide) {
       throw new UnauthorizedException('Identifiants invalides');
     }
     if (!utilisateur.actif) {
       throw new UnauthorizedException('Ce compte a été désactivé');
-    }
-
-    const motDePasseValide = await bcrypt.compare(
-      dto.motDePasse,
-      utilisateur.motDePasseHash,
-    );
-    if (!motDePasseValide) {
-      throw new UnauthorizedException('Identifiants invalides');
     }
 
     return this.emettreJetons(utilisateur, ctx);
@@ -107,14 +113,23 @@ export class AuthService {
     const utilisateur = await this.prisma.utilisateur.findUnique({
       where: { id: enregistrement.utilisateurId },
     });
-    if (!utilisateur) {
-      throw new UnauthorizedException('Compte introuvable');
+    if (!utilisateur || !utilisateur.actif) {
+      throw new UnauthorizedException('Compte introuvable ou désactivé');
     }
 
+    // Révocation conditionnelle AVANT d'émettre : deux appels simultanés avec
+    // le même jeton ne peuvent pas obtenir chacun une nouvelle session.
+    const consomme = await this.prisma.refreshToken.updateMany({
+      where: { id: enregistrement.id, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+    if (consomme.count === 0) {
+      throw new UnauthorizedException('Refresh token déjà utilisé');
+    }
     const nouveau = await this.creerRefreshToken(utilisateur.id, ctx);
     await this.prisma.refreshToken.update({
       where: { id: enregistrement.id },
-      data: { revokedAt: new Date(), remplacePar: nouveau.id },
+      data: { remplacePar: nouveau.id },
     });
 
     return {

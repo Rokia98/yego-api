@@ -67,7 +67,33 @@ export class TicketsService {
     siege: string | undefined,
     user: AuthenticatedUser,
   ) {
-    const reservation = await this.prisma.reservation.findUnique({
+    const cible = await this.prisma.reservation.findUnique({
+      where: { id: reservationId },
+      select: {
+        departId: true,
+        utilisateurId: true,
+        depart: { select: { trajet: { select: { compagnieId: true } } } },
+      },
+    });
+    if (!cible) throw new NotFoundException('Réservation introuvable');
+    this.assertAcces(cible, user);
+
+    // Verrou sur la ligne du départ : les générations simultanées (même
+    // réservation, ou même siège sur ce départ) passent l'une après l'autre.
+    // Sans lui, N requêtes parallèles lisaient toutes « 0 ticket » et
+    // obtenaient N QR valides pour une seule place payée.
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM departs WHERE id = ${cible.departId} FOR UPDATE`;
+      return this.creerTicketVerrouille(tx, reservationId, siege);
+    });
+  }
+
+  private async creerTicketVerrouille(
+    tx: Prisma.TransactionClient,
+    reservationId: number,
+    siege: string | undefined,
+  ) {
+    const reservation = await tx.reservation.findUniqueOrThrow({
       where: { id: reservationId },
       include: {
         paiement: true,
@@ -78,8 +104,6 @@ export class TicketsService {
         depart: { include: { trajet: { select: { compagnieId: true } } } },
       },
     });
-    if (!reservation) throw new NotFoundException('Réservation introuvable');
-    this.assertAcces(reservation, user);
     if (reservation.statut !== 'confirmee') {
       throw new BadRequestException(
         'Cette réservation est annulée ou expirée',
@@ -113,7 +137,7 @@ export class TicketsService {
     // cette réservation, qu'on est justement en train de matérialiser.
     if (siegeFinal) {
       const occupes = await siegesOccupesDepart(
-        this.prisma,
+        tx,
         reservation.departId,
         reservationId,
       );
@@ -126,29 +150,27 @@ export class TicketsService {
 
     // Le codeQr est un jeton signé (Ed25519) qui embarque de quoi le vérifier
     // hors-ligne au contrôle. Il contient l'id du ticket : on crée d'abord la
-    // ligne, puis on la signe et on remplace le codeQr (transaction atomique).
+    // ligne, puis on la signe et on remplace le codeQr (même transaction).
     const dateDepart = reservation.depart.dateDepart.toISOString().slice(0, 10);
-    return this.prisma.$transaction(async (tx) => {
-      const cree = await tx.ticket.create({
-        data: {
-          reservationId,
-          codeQr: `provisoire-${randomUUID()}`,
-          siege: siegeFinal ?? null,
-        },
-      });
-      const codeQr = signerTicket({
-        t: cree.id,
-        r: reservationId,
-        d: reservation.departId,
-        c: reservation.depart.trajet.compagnieId,
-        s: siegeFinal ?? null,
-        dd: dateDepart,
-      });
-      return tx.ticket.update({
-        where: { id: cree.id },
-        data: { codeQr },
-        include: { reservation: { include: { depart: true } } },
-      });
+    const cree = await tx.ticket.create({
+      data: {
+        reservationId,
+        codeQr: `provisoire-${randomUUID()}`,
+        siege: siegeFinal ?? null,
+      },
+    });
+    const codeQr = signerTicket({
+      t: cree.id,
+      r: reservationId,
+      d: reservation.departId,
+      c: reservation.depart.trajet.compagnieId,
+      s: siegeFinal ?? null,
+      dd: dateDepart,
+    });
+    return tx.ticket.update({
+      where: { id: cree.id },
+      data: { codeQr },
+      include: { reservation: { include: { depart: true } } },
     });
   }
 
